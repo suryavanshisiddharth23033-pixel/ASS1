@@ -1,0 +1,387 @@
+module Top
+	submodule P : Processor<>
+	submodule C : Cache<>
+
+	net n_request : capacity 1 width 6
+	net n_response : capacity 1 width 17
+
+	P.outp => n_request
+	C.inp <= n_request
+	C.outp => n_response
+	P.inp <= n_response
+end module
+
+module Processor
+	parameter int P_LOAD = 40
+	parameter int P_STORE = 30
+	parameter int EXECUTION_DELAY = 3
+	parameter int TOTAL_INSTRUCTIONS = 100
+
+	outport outp : width 6
+	inport inp : width 17
+
+	include $#include <cstdlib>$
+	include $#include <vector>$
+	decl $
+		enum MemOpType{ IFETCH = 0, LOAD = 1, STORE = 2, ATOMICLOADSTORE = 3 };
+		enum MemSize{ WORD = 0, DOUBLEWORD = 1, QUADWORD = 2 };
+
+		std::vector<int> timeTaken;
+
+		int pc;
+		int instr_count;
+
+		int waitStart;
+		int waitEnd;
+		int amat;
+
+		uint32_t requestAddr;
+		uint8_t requestType;
+		uint8_t requestSize;
+
+		token<6> requestToken;
+		token<17> responseToken;
+
+		uint8_t responseErr;
+		uint32_t responseData0;
+		uint32_t responseData1;
+		uint32_t responseData2;
+		uint32_t responseData3;
+
+		bool ok;
+		bool pulled;
+		bool hasToken;
+		bool keepRunning;
+
+		bool do_load;
+		bool do_store;
+
+		int getSizeBytes(int size){
+			if(size == WORD) return 4;
+			if(size == DOUBLEWORD) return 8;
+			return 16;
+		}
+
+		uint32_t alignAddr(uint32_t addr, int size){
+			if(size == WORD) return (addr & ~3);
+			else if(size == DOUBLEWORD) return (addr & ~7);
+			else return (addr & ~15);
+		}
+
+		void printData(int size){
+			int bytes = getSizeBytes(size);
+
+			if(bytes==4){
+				log << " data="
+				<< ((responseData0 >> 24) & 0xff) << " "
+				<< ((responseData0 >> 16) & 0xff) << " "
+				<< ((responseData0 >> 8)  & 0xff) << " "
+				<< (responseData0 & 0xff);
+			}else if(bytes==8){
+				log << " data="
+				<< ((responseData0 >> 24) & 0xff) << " "
+				<< ((responseData0 >> 16) & 0xff) << " "
+				<< ((responseData0 >> 8)  & 0xff) << " "
+				<< (responseData0 & 0xff) << " "
+				<< ((responseData1 >> 24) & 0xff) << " "
+				<< ((responseData1 >> 16) & 0xff) << " "
+				<< ((responseData1 >> 8)  & 0xff) << " "
+				<< (responseData1 & 0xff);
+			}else{
+				log << " data="
+				<< ((responseData0 >> 24) & 0xff) << " "
+				<< ((responseData0 >> 16) & 0xff) << " "
+				<< ((responseData0 >> 8)  & 0xff) << " "
+				<< (responseData0 & 0xff) << " "
+				<< ((responseData1 >> 24) & 0xff) << " "
+				<< ((responseData1 >> 16) & 0xff) << " "
+				<< ((responseData1 >> 8)  & 0xff) << " "
+				<< (responseData1 & 0xff) << " "
+				<< ((responseData2 >> 24) & 0xff) << " "
+				<< ((responseData2 >> 16) & 0xff) << " "
+				<< ((responseData2 >> 8)  & 0xff) << " "
+				<< (responseData2 & 0xff) << " "
+				<< ((responseData3 >> 24) & 0xff) << " "
+				<< ((responseData3 >> 16) & 0xff) << " "
+				<< ((responseData3 >> 8)  & 0xff) << " "
+				<< (responseData3 & 0xff);
+			}
+		}
+	$
+
+	behavior
+		do
+			$ 
+			requestType = IFETCH; 
+            requestSize = WORD; 
+            requestAddr = pc * 4; 
+            log << endl << "IFETCH" << " pc=" << pc << " addr=" << requestAddr;
+            sitar::pack(requestToken, requestAddr, requestType, requestSize); 
+            ok = false; 
+            $;
+
+			do
+				wait until (this_phase==1);
+				$ ok = outp.push(requestToken); $;
+				if(not ok) then
+					wait
+				end if;
+			while(not ok) end do;
+
+			$ waitStart = current_time.cycle(); $;
+
+			do
+				wait until (this_phase == 0);
+				$ hasToken = inp.peek(responseToken); $;
+				if(not hasToken) then
+					wait
+				end if;
+			while(not hasToken) end do;
+
+			$ waitEnd = current_time.cycle(); $;
+
+			$ timeTaken.push_back(waitEnd - waitStart); $;
+
+			$ 
+            pulled = inp.pull(responseToken); 
+            sitar::unpack(responseToken, responseErr, responseData0, responseData1, responseData2, responseData3); 
+            $;
+
+			$ if(responseErr != 0){ log << endl << " IFETCH Error=" << (int)responseErr; }else{ log << endl << " IFETCH OK"; printData(WORD); } $;
+
+			wait(EXECUTION_DELAY, 0);
+
+			$ do_load = (rand() % 100) < P_LOAD; do_store = (rand() % 100) < P_STORE; $;
+
+			if(do_load) then
+				$ 
+                requestType = LOAD; 
+                requestSize = rand() % 3; 
+                requestAddr = pc * 16 + 64; 
+                requestAddr = alignAddr(requestAddr, requestSize); 
+                log << endl << "LOAD" << " addr=" << requestAddr << " size=" << (int)requestSize; sitar::pack(requestToken, requestAddr, requestType, requestSize); ok = false; 
+                $;
+				do
+					wait until (this_phase==1);
+					$ ok = outp.push(requestToken); $;
+					if(not ok) then
+						wait
+					end if;
+				while(not ok) end do;
+
+				do
+					wait until (this_phase == 0);
+					$ hasToken = inp.peek(responseToken); $;
+					if(not hasToken) then
+						wait
+					end if;
+				while(not hasToken) end do;
+
+				$ 
+                pulled = inp.pull(responseToken); 
+                sitar::unpack(responseToken, responseErr, responseData0, responseData1, responseData2, responseData3); 
+                $;
+
+				$ if(responseErr!=0){ log << endl << "LOAD ERROR=" << (int)responseErr; }else{ log << endl << " LOAD OK"; printData(requestSize); } $;
+			end if;
+
+			if(do_store) then
+				$ 
+                requestType = STORE; 
+                requestSize = rand() % 3; 
+                requestAddr = pc * 16 + 128; 
+                requestAddr = alignAddr(requestAddr, requestSize); 
+                log << endl << "STORE" << " addr=" << requestAddr << " size=" << (int)requestSize; 
+                sitar::pack(requestToken, requestAddr, requestType, requestSize); 
+                ok = false; 
+                $;
+
+				do
+					wait until (this_phase==1);
+					$ ok = outp.push(requestToken); $;
+					if(not ok) then
+						wait
+					end if;
+				while(not ok) end do;
+
+				do
+					wait until (this_phase == 0);
+					$ hasToken = inp.peek(responseToken); $;
+					if(not hasToken) then
+						wait
+					end if;
+				while(not hasToken) end do;
+
+				$ 
+                pulled = inp.pull(responseToken); 
+                sitar::unpack(responseToken, responseErr, responseData0, responseData1, responseData2, responseData3); 
+                $;
+
+				$ if(responseErr!=0){ log << endl << "STORE ERROR=" << (int)responseErr; }else{ log << endl << " STORE OK"; printData(requestSize); } $;
+			end if;
+
+			$ 
+            pc++; 
+            instr_count++; 
+            log << endl << "INSTRUCTION " << instr_count << " COMPLETE";
+            keepRunning = (instr_count < TOTAL_INSTRUCTIONS);
+            $;
+
+		while(keepRunning) end do;
+
+		$
+		if(instr_count >= TOTAL_INSTRUCTIONS){
+			log << endl << "Completed " << TOTAL_INSTRUCTIONS << " instructions";
+		}else{
+			log << endl << "TIME LIMIT EXCEEDED at cycle " << current_time.cycle();
+		}
+		$;
+
+		$
+		for(int i=0;i<(int) timeTaken.size();i++){
+			amat += timeTaken[i];
+		}
+
+		amat /= (int) timeTaken.size();
+		log << endl << "AMAT: " << amat;
+		$;
+		stop simulation;
+	end behavior
+end module
+
+module Cache
+	parameter int P_HIT = 100
+	parameter int DELAY_HIT = 4
+	parameter int DELAY_MISS = 40
+	inport inp : width 6
+	outport outp : width 17
+
+	include $#include <cstdlib>$
+	include $#include <vector>$
+	include $#include <cstdint>$
+
+	decl $
+		enum MemOpType{ IFETCH = 0, LOAD = 1, STORE = 2, ATOMICLOADSTORE = 3 };
+		enum MemSize{ WORD = 0, DOUBLEWORD = 1, QUADWORD = 2 };
+
+		std::vector<uint8_t> mem;
+		token<6> requestToken;
+		token<17> responseToken;
+
+		uint32_t requestAddr;
+		uint8_t requestType;
+		uint8_t requestSize;
+
+		uint8_t responseErr;
+		uint32_t responseData0;
+		uint32_t responseData1;
+		uint32_t responseData2;
+		uint32_t responseData3;
+
+		bool pulled;
+		bool ok;
+		bool hasToken;
+
+		int getSizeBytes(int size){
+			if(size == WORD) return 4;
+			if(size == DOUBLEWORD) return 8;
+			return 16;
+		}
+
+		bool isAligned(uint32_t addr, int size){
+			if(size == WORD) return (addr & 3) == 0;
+			if(size == DOUBLEWORD) return (addr & 7) == 0;
+			return (addr & 15) == 0;
+		}
+
+		void read_memory(uint32_t addr, int size){
+			responseData0 = 0;
+			responseData1 = 0;
+			responseData2 = 0;
+			responseData3 = 0;
+
+			if(size == WORD){
+				responseData0 = ((mem[addr] & 0xff) << 24) | ((mem[addr+1] & 0xff) << 16) | ((mem[addr+2] & 0xff) << 8) | (mem[addr+3] & 0xff);
+			}
+
+			if(size == DOUBLEWORD){
+				responseData0 = ((mem[addr] & 0xff) << 24) | ((mem[addr+1] & 0xff) << 16) | ((mem[addr+2] & 0xff) << 8) | (mem[addr+3] & 0xff);
+				responseData1 = ((mem[addr+4] & 0xff) << 24) | ((mem[addr+5] & 0xff) << 16) | ((mem[addr+6] & 0xff) << 8) | (mem[addr+7] & 0xff);
+			}
+
+			if(size == QUADWORD){
+				responseData0 = ((mem[addr] & 0xff) << 24) | ((mem[addr+1] & 0xff) << 16) | ((mem[addr+2] & 0xff) << 8) | (mem[addr+3] & 0xff);
+				responseData1 = ((mem[addr+4] & 0xff) << 24) | ((mem[addr+5] & 0xff) << 16) | ((mem[addr+6] & 0xff) << 8) | (mem[addr+7] & 0xff);
+				responseData2 = ((mem[addr+8] & 0xff) << 24) | ((mem[addr+9] & 0xff) << 16) | ((mem[addr+10] & 0xff) << 8) | (mem[addr+11] & 0xff);
+				responseData3 = ((mem[addr+12] & 0xff) << 24) | ((mem[addr+13] & 0xff) << 16) | ((mem[addr+14] & 0xff) << 8) | (mem[addr+15] & 0xff);
+			}
+		}
+
+		void write_word(uint32_t addr, uint32_t data){
+			mem[addr]   = (data >> 24) & 0xff;
+			mem[addr+1] = (data >> 16) & 0xff;
+			mem[addr+2] = (data >> 8)  & 0xff;
+			mem[addr+3] = data & 0xff;
+		}
+
+		bool hit;
+	$
+
+	init $
+		mem.resize(1024);
+		for(int i=0;i<1024;i++) mem[i] = i & 0xff;
+	$
+
+	behavior
+		do
+			wait until (this_phase == 1);
+			$ hasToken = inp.peek(requestToken); $;
+			if(not hasToken) then
+				wait
+			end if;
+			if(hasToken) then
+				$ 
+                pulled = inp.pull(requestToken); 
+                sitar::unpack(requestToken, requestAddr, requestType, requestSize); 
+                responseData0 = 0; 
+                responseData1 = 0; 
+                responseData2 = 0; 
+                responseData3 = 0; 
+                responseErr = 0; 
+                int bytes = getSizeBytes(requestSize); 
+                if(requestAddr + bytes > 1024){ 
+                    responseErr = 1; log << endl << "Memory: OUT OF BOUND !! Addr=" << requestAddr; 
+                }else if(!isAligned(requestAddr, requestSize)){ 
+                    responseErr = 2; 
+                    log << endl << "Alignment Issue !! Addr=" << requestAddr << " Size=" << requestSize; 
+                }else{ 
+                    if(requestType == IFETCH){ 
+                        read_memory(requestAddr, requestSize); 
+                    }else if(requestType == LOAD){ 
+                        read_memory(requestAddr, requestSize); 
+                    }else if(requestType == STORE){ 
+                        write_word(requestAddr, 0xAABBCCDD); 
+                    }else if(requestType == ATOMICLOADSTORE){ 
+                        read_memory(requestAddr, requestSize); 
+                        write_word(requestAddr, 0x11223344); 
+                    } 
+                } 
+
+				hit = (rand() % 100) < P_HIT;
+                $;
+
+				if(hit) then
+					$log << endl << "Cache Hit";$;
+					wait(DELAY_HIT, 0);
+				else 
+					$log << endl << "Cache Miss";$;
+					wait(DELAY_MISS, 0);
+				end if;
+
+				$ sitar::pack(responseToken, responseErr, responseData0, responseData1, responseData2, responseData3); $;
+				wait until (this_phase == 1);
+				$ outp.push(responseToken); $;
+			end if;
+		while(1) end do;
+	end behavior
+end module

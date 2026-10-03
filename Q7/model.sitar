@@ -1,0 +1,13 @@
+module top
+	submodule C: Core<>
+end module
+
+module Core
+	submodule P : Processor<>
+	submodule M : Memory<>
+    submodule ICACHE : Cache<>
+	submodule DCACHE : Cache<>
+
+
+end module
+
