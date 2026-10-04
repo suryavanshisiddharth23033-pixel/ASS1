@@ -3,11 +3,25 @@ module top
 end module
 
 module Core
-	submodule P : Processor<>
-	submodule M : Memory<>
-    submodule ICACHE : Cache<>
-	submodule DCACHE : Cache<>
-
-
+	procedure proc: Processor
+	procedure icache: ICache
+	procedure dcache: DCache
 end module
 
+procedure Processor
+	behavior
+
+	end behavior
+end procedure
+
+procedure ICache
+	behavior
+
+	end behavior
+end procedure
+
+procedure DCache
+	behavior
+
+	end behavior
+end procedure
