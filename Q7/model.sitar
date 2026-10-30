@@ -1,13 +1,14 @@
-module Top
-	submodule IM : Memory<>
-    submodule DM : Memory<>
-	submodule C : Core<>
 
-	net c_im_request : capacity 1 width 6
-	net im_c_response : capacity 1 width 17
+module Top
+    submodule IM : Memory<>
+    submodule DM : Memory<>
+    submodule C : Core
+
+    net c_im_request : capacity 1 width 6
+    net im_c_response : capacity 1 width 17
 
     net c_dm_request : capacity 1 width 6
-	net dm_c_response : capacity 1 width 17
+    net dm_c_response : capacity 1 width 17
 
     C.im_inp <= im_c_response
     IM.outp => im_c_response
@@ -20,23 +21,73 @@ module Top
     DM.inp <= c_dm_request
 end module
 
+
+// ============================================================
+// PROCESSOR
+// ============================================================
+
 procedure Processor
-	parameter int P_LOAD = 100
-	parameter int P_STORE = 100
-	parameter int EXECUTION_DELAY = 3
-	parameter int TOTAL_INSTRUCTIONS = 1000
-	parameter int MAX_TIME = 100000
-	parameter int BLOCK_SIZE = 16
-    
 
-	include $#include <cstdlib>$
-	decl $
-		enum MemOpType{ IFETCH = 0, LOAD = 1, STORE = 2, ATOMICLOADSTORE = 3 };
-		enum MemSize{ WORD = 0, DOUBLEWORD = 1, QUADWORD = 2 };
+    parameter int P_LOAD = 40
+    parameter int P_STORE = 30
+    parameter int EXECUTION_DELAY = 3
+    parameter int TOTAL_INSTRUCTIONS = 1000
+    parameter int MAX_TIME = 100000
+    parameter int BLOCK_SIZE = 16
 
-		int instr_count;
+    include $#include <cstdlib>$
+    include $#include <cstdint>$
 
-		// ICACHE shared-variable pointers
+    decl $
+        enum MemOpType {
+            IFETCH = 0,
+            LOAD = 1,
+            STORE = 2,
+            ATOMICLOADSTORE = 3
+        };
+
+        enum MemSize {
+            WORD = 0,
+            DOUBLEWORD = 1,
+            QUADWORD = 2
+        };
+
+        int instr_count;
+
+        uint32_t requestAddr;
+        uint8_t requestType;
+        uint8_t requestSize;
+
+        uint8_t responseErr;
+        uint32_t responseData0;
+        uint32_t responseData1;
+        uint32_t responseData2;
+        uint32_t responseData3;
+
+        bool hasToken;
+        bool keepRunning;
+
+        bool do_load;
+        bool do_store;
+
+        double TEMPORAL_LOCALITY;
+        double SPATIAL_LOCALITY;
+
+        static const uint32_t ADDR_SPACE = 1024;
+        static const int HISTORY_SIZE = 8;
+
+        uint32_t addrHistory[HISTORY_SIZE];
+
+        int histCount;
+        int histPos;
+
+        uint32_t prevAddr;
+        bool havePrev;
+
+        // ----------------------------------------------------
+        // ICACHE shared-variable pointers
+        // ----------------------------------------------------
+
         bool *ic_req_valid;
         bool *ic_resp_valid;
 
@@ -45,12 +96,16 @@ procedure Processor
         uint8_t *ic_req_size;
 
         uint8_t *ic_resp_err;
+
         uint32_t *ic_resp_data0;
         uint32_t *ic_resp_data1;
         uint32_t *ic_resp_data2;
         uint32_t *ic_resp_data3;
 
+        // ----------------------------------------------------
         // DCACHE shared-variable pointers
+        // ----------------------------------------------------
+
         bool *dc_req_valid;
         bool *dc_resp_valid;
 
@@ -59,647 +114,1584 @@ procedure Processor
         uint8_t *dc_req_size;
 
         uint8_t *dc_resp_err;
+
         uint32_t *dc_resp_data0;
         uint32_t *dc_resp_data1;
         uint32_t *dc_resp_data2;
         uint32_t *dc_resp_data3;
 
-		bool ok;
-		bool pulled;
-		bool hasToken;
-		bool keepRunning;
-
-		bool do_load;
-		bool do_store;
-
-		double TEMPORAL_LOCALITY;
-		double SPATIAL_LOCALITY;
-
-		static const uint32_t ADDR_SPACE = 1024;
-		static const int HISTORY_SIZE = 8;
-		uint32_t addrHistory[HISTORY_SIZE];
-		int histCount;
-		int histPos;
-		uint32_t prevAddr;
-		bool havePrev;
-
-		double frand01(){
-			return (rand() % 1000000) / 1000000.0;
-		}
-
-		uint32_t genAddress(){
-			uint32_t addr;
-			if(havePrev && frand01() < SPATIAL_LOCALITY){
-				uint32_t blockStart = prevAddr & ~((uint32_t)BLOCK_SIZE - 1);
-				addr = blockStart + 4 * (uint32_t)(rand() % (BLOCK_SIZE / 4));
-			}else if(histCount > 0 && frand01() < TEMPORAL_LOCALITY){
-				addr = addrHistory[rand() % histCount];
-			}else{
-				addr = 4 * (uint32_t)(rand() % (ADDR_SPACE / 4));
-			}
-			addrHistory[histPos] = addr;
-			histPos = (histPos + 1) % HISTORY_SIZE;
-			if(histCount < HISTORY_SIZE) histCount++;
-			prevAddr = addr;
-			havePrev = true;
-			return addr;
-		}
-
-		int getSizeBytes(int size){
-			if(size == WORD) return 4;
-			if(size == DOUBLEWORD) return 8;
-			return 16;
-		}
-
-		uint32_t alignAddr(uint32_t addr, int size){
-			if(size == WORD) return (addr & ~3);
-			else if(size == DOUBLEWORD) return (addr & ~7);
-			else return (addr & ~15);
-		}
-
-		void printData(int size){
-			int bytes = getSizeBytes(size);
-
-			if(bytes==4){
-				log << " data="
-				<< ((responseData0 >> 24) & 0xff) << " "
-				<< ((responseData0 >> 16) & 0xff) << " "
-				<< ((responseData0 >> 8)  & 0xff) << " "
-				<< (responseData0 & 0xff);
-			}else if(bytes==8){
-				log << " data="
-				<< ((responseData0 >> 24) & 0xff) << " "
-				<< ((responseData0 >> 16) & 0xff) << " "
-				<< ((responseData0 >> 8)  & 0xff) << " "
-				<< (responseData0 & 0xff) << " "
-				<< ((responseData1 >> 24) & 0xff) << " "
-				<< ((responseData1 >> 16) & 0xff) << " "
-				<< ((responseData1 >> 8)  & 0xff) << " "
-				<< (responseData1 & 0xff);
-			}else{
-				log << " data="
-				<< ((responseData0 >> 24) & 0xff) << " "
-				<< ((responseData0 >> 16) & 0xff) << " "
-				<< ((responseData0 >> 8)  & 0xff) << " "
-				<< (responseData0 & 0xff) << " "
-				<< ((responseData1 >> 24) & 0xff) << " "
-				<< ((responseData1 >> 16) & 0xff) << " "
-				<< ((responseData1 >> 8)  & 0xff) << " "
-				<< (responseData1 & 0xff) << " "
-				<< ((responseData2 >> 24) & 0xff) << " "
-				<< ((responseData2 >> 16) & 0xff) << " "
-				<< ((responseData2 >> 8)  & 0xff) << " "
-				<< (responseData2 & 0xff) << " "
-				<< ((responseData3 >> 24) & 0xff) << " "
-				<< ((responseData3 >> 16) & 0xff) << " "
-				<< ((responseData3 >> 8)  & 0xff) << " "
-				<< (responseData3 & 0xff);
-			}
-		}
-	$
-
-	init $
-		histCount = 0;
-		histPos = 0;
-		prevAddr = 0;
-		havePrev = false;
-		TEMPORAL_LOCALITY = 0.0;
-		SPATIAL_LOCALITY = 0.0;
-		if(const char* e = std::getenv("TEMPORAL_LOCALITY")) TEMPORAL_LOCALITY = std::atof(e);
-		if(const char* e = std::getenv("SPATIAL_LOCALITY")) SPATIAL_LOCALITY = std::atof(e);
-	$
-
-	behavior
-		do
-			$ if(instr_count == 0){ log << endl << "LOCALITY temporal=" << TEMPORAL_LOCALITY << " spatial=" << SPATIAL_LOCALITY; }
-            requestType = IFETCH; 
-            requestSize = WORD; 
-            requestAddr = alignAddr(genAddress(), WORD); 
-            log << endl << "IFETCH" << " addr=" << requestAddr;
-            // fetch from ICACHE
-            ok = false; 
-            $;
-            
-
-            // Replace this block
-			do
-				wait until (this_phase==1);
-				$ ok = outp.push(requestToCache); $;
-				if(not ok) then
-					wait
-				end if;
-			while(not ok) end do;
-
-
-            // Replace this block
-			do
-				wait until (this_phase == 0);
-				$ hasToken = inp.peek(responseFromCache); $;
-				if(not hasToken) then
-					wait
-				end if;
-			while(not hasToken) end do;
-
-			$ 
-            pulled = inp.pull(responseFromCache); 
-            sitar::unpack(responseFromCache, responseErr, responseData0, responseData1, responseData2, responseData3); 
-            $;
-
-			$ if(responseErr != 0){ log << endl << " IFETCH Error=" << (int)responseErr; }else{ log << endl << " IFETCH OK"; printData(WORD); } $;
-
-			wait(EXECUTION_DELAY, 0);
-
-			$ do_load = (rand() % 100) < P_LOAD; do_store = (rand() % 100) < P_STORE; $;
-
-			if(do_load) then
-				$
-                requestType = LOAD;
-                requestSize = rand() % 3;
-                requestAddr = alignAddr(genAddress(), requestSize);
-                log << endl << "LOAD" << " addr=" << requestAddr << " size=" << (int)requestSize; sitar::pack(requestToCache, requestAddr, requestType, requestSize); ok = false;
-                $;
-
-                // replace this block
-				do
-					wait until (this_phase==1);
-					$ ok = outp.push(requestToCache); $;
-					if(not ok) then
-						wait
-					end if;
-				while(not ok) end do;
-
-                // replace this block
-				do
-					wait until (this_phase == 0);
-					$ hasToken = inp.peek(responseFromCache); $;
-					if(not hasToken) then
-						wait
-					end if;
-				while(not hasToken) end do;
-
-				$
-                pulled = inp.pull(responseFromCache);
-                sitar::unpack(responseFromCache, responseErr, responseData0, responseData1, responseData2, responseData3);
-                $;
-
-				$ if(responseErr!=0){ log << endl << "LOAD ERROR=" << (int)responseErr; }else{ log << endl << " LOAD OK"; printData(requestSize); } $;
-			end if;
-
-			if(do_store) then
-				$
-                requestType = STORE;
-                requestSize = rand() % 3;
-                requestAddr = alignAddr(genAddress(), requestSize);
-                log << endl << "STORE" << " addr=" << requestAddr << " size=" << (int)requestSize;
-                // request here !!!
-                ok = false;
-                $;
-
-                // replace this block
-				do
-					wait until (this_phase==1);
-					$ ok = outp.push(requestToCache); $;
-					if(not ok) then
-						wait
-					end if;
-				while(not ok) end do;
-                
-                // replace this block
-				do
-					wait until (this_phase == 0);
-					$ hasToken = inp.peek(responseFromCache); $;
-					if(not hasToken) then
-						wait
-					end if;
-				while(not hasToken) end do;
-
-				$
-                pulled = inp.pull(responseFromCache);
-                sitar::unpack(responseFromCache, responseErr, responseData0, responseData1, responseData2, responseData3);
-                $;
-
-				$ if(responseErr!=0){ log << endl << "STORE ERROR=" << (int)responseErr; }else{ log << endl << " STORE OK"; printData(requestSize); } $;
-			end if;
-
-			$ 
-            instr_count++; 
-            log << endl << "INSTRUCTION " << instr_count << " COMPLETE";
-            keepRunning = (instr_count < TOTAL_INSTRUCTIONS) && (current_time.cycle() < MAX_TIME);
-            $;
-
-		while(keepRunning) end do;
-
-		$ requestType = IFETCH; requestSize = WORD; requestAddr = 0xFFFFFFFF;
-		sitar::pack(requestToCache, requestAddr, requestType, requestSize); ok = false; $;
-
-		do
-			wait until (this_phase==1);
-			$ ok = outp.push(requestToCache); $;
-			if(not ok) then
-				wait
-			end if;
-		while(not ok) end do;
-
-		do
-			wait until (this_phase == 0);
-			$ hasToken = inp.peek(responseFromCache); $;
-			if(not hasToken) then
-				wait
-			end if;
-		while(not hasToken) end do;
-
-		$
-		pulled = inp.pull(responseFromCache);
-		sitar::unpack(responseFromCache, responseErr, responseData0, responseData1, responseData2, responseData3);
-		$;
-
-		$
-		if(instr_count >= TOTAL_INSTRUCTIONS){
-			log << endl << "Completed " << TOTAL_INSTRUCTIONS << " instructions";
-		}else{
-			log << endl << "TIME LIMIT EXCEEDED at cycle " << current_time.cycle();
-		}
-		$;
-		stop simulation;
-	end behavior
-end procedure
-
-procedure Cache
-	parameter int BLOCK_SIZE = 16
-	parameter int CACHE_DELAY = 4
-	parameter int NUM_BLOCKS = 16
-
-	include $#include <cstdlib>$
-	include $#include <vector>$
-	include $#include <cstdint>$
-	include $#include <utility>$
-	include $#include <cmath>$
-
-	decl $
-		enum MemOpType{ IFETCH = 0, LOAD = 1, STORE = 2, ATOMICLOADSTORE = 3 };
-		enum MemSize{ WORD = 0, DOUBLEWORD = 1, QUADWORD = 2 };
-		enum CacheStatus{ MISS = -1, HIT = 1 };
-		class CacheLine{
-			public:
-				bool validBit;
-				uint32_t tagBit;
-				std::vector<uint8_t> data;
-
-			CacheLine(){
-				this->validBit = false;
-				this->tagBit = 0;
-				this->data.resize(BLOCK_SIZE);
-			}
-		};
-
-		std::vector<CacheLine> cache;
-		token<6> requestToMemory;
-        token<17> responseFromMemory;
-
-		uint32_t requestAddr;
-		uint8_t requestType;
-		uint8_t requestSize;
-		int cacheStatus;
-		bool isStatRequest;
-
-		long statTotal;
-		long statHits;
-		long statMisses;
-
-		uint8_t responseErr;
-		uint32_t responseData0;
-		uint32_t responseData1;
-		uint32_t responseData2;
-		uint32_t responseData3;
-
-		bool pulled;
-		bool ok;
-		bool hasToken;
-
-		int getSizeBytes(int size){
-			if(size == WORD) return 4;
-			if(size == DOUBLEWORD) return 8;
-			return 16;
-		}
-
-		bool isAligned(uint32_t addr, int size){
-			if(size == WORD) return (addr & 3) == 0;
-			if(size == DOUBLEWORD) return (addr & 7) == 0;
-			return (addr & 15) == 0;
-		}
-
-		uint32_t get_tag(uint32_t addr){
-			return addr >> (int)std::log2(BLOCK_SIZE);
-		}
-
-		uint32_t get_offset(uint32_t addr){
-			return addr & (BLOCK_SIZE-1);
-		}
-
-		int read_cache(uint32_t addr, int size){
-			responseData0 = 0;
-			responseData1 = 0;
-			responseData2 = 0;
-			responseData3 = 0;
-
-			uint32_t tagBit = get_tag(addr);
-			uint32_t offset = get_offset(addr);
-
-			if(size == WORD){
-				for(int i=0;i<NUM_BLOCKS;i++){
-					if(cache[i].validBit && cache[i].tagBit == tagBit){
-						responseData0 = ((cache[i].data[offset] & 0xff) << 24) | ((cache[i].data[offset+1] & 0xff) << 16) | ((cache[i].data[offset+2] & 0xff) << 8) | (cache[i].data[offset+3] & 0xff);
-						return 1;
-					}
-				}
-				return -1;
-			}else if(size == DOUBLEWORD){
-				for(int i=0;i<NUM_BLOCKS;i++){
-					if(cache[i].validBit && cache[i].tagBit == tagBit){
-						responseData0 = ((cache[i].data[offset] & 0xff) << 24) | ((cache[i].data[offset+1] & 0xff) << 16) | ((cache[i].data[offset+2] & 0xff) << 8) | (cache[i].data[offset+3] & 0xff);
-						responseData1 = ((cache[i].data[offset+4] & 0xff) << 24) | ((cache[i].data[offset+5] & 0xff) << 16) | ((cache[i].data[offset+6] & 0xff) << 8) | (cache[i].data[offset+7] & 0xff);
-						return 1;
-					}
-				}
-				return -1;
-			}else if(size == QUADWORD){
-				for(int i=0;i<NUM_BLOCKS;i++){
-					if(cache[i].validBit && cache[i].tagBit == tagBit){
-						responseData0 = ((cache[i].data[offset] & 0xff) << 24) | ((cache[i].data[offset+1] & 0xff) << 16) | ((cache[i].data[offset+2] & 0xff) << 8) | (cache[i].data[offset+3] & 0xff);
-						responseData1 = ((cache[i].data[offset+4] & 0xff) << 24) | ((cache[i].data[offset+5] & 0xff) << 16) | ((cache[i].data[offset+6] & 0xff) << 8) | (cache[i].data[offset+7] & 0xff);
-						responseData2 = ((cache[i].data[offset+8] & 0xff) << 24) | ((cache[i].data[offset+9] & 0xff) << 16) | ((cache[i].data[offset+10] & 0xff) << 8) | (cache[i].data[offset+11] & 0xff);
-						responseData3 = ((cache[i].data[offset+12] & 0xff) << 24) | ((cache[i].data[offset+13] & 0xff) << 16) | ((cache[i].data[offset+14] & 0xff) << 8) | (cache[i].data[offset+15] & 0xff);
-						return 1;
-					}
-				}
-				return -1;
-			}
-
-			return 0;
-		}
-
-		void write_cache(uint32_t addr){
-			uint32_t tagBit = get_tag(addr);
-			int replaceLine = rand() % NUM_BLOCKS;
-			for(int i=0;i<NUM_BLOCKS;i++){
-				if(!cache[i].validBit){
-					replaceLine = i;
-					break;
-				}
-			}
-			cache[replaceLine].data[0] = (responseData0 >> 24) & 0xff;
-			cache[replaceLine].data[1] = (responseData0 >> 16) & 0xff;
-			cache[replaceLine].data[2] = (responseData0 >> 8) & 0xff;
-			cache[replaceLine].data[3] = (responseData0) & 0xff;
-			cache[replaceLine].data[4] = (responseData1 >> 24) & 0xff;
-			cache[replaceLine].data[5] = (responseData1 >> 16) & 0xff;
-			cache[replaceLine].data[6] = (responseData1 >> 8) & 0xff;
-			cache[replaceLine].data[7] = (responseData1) & 0xff;
-			cache[replaceLine].data[8] = (responseData2 >> 24) & 0xff;
-			cache[replaceLine].data[9] = (responseData2 >> 16) & 0xff;
-			cache[replaceLine].data[10] = (responseData2 >> 8) & 0xff;
-			cache[replaceLine].data[11] = (responseData2) & 0xff;
-			cache[replaceLine].data[12] = (responseData3 >> 24) & 0xff;
-			cache[replaceLine].data[13] = (responseData3 >> 16) & 0xff;
-			cache[replaceLine].data[14] = (responseData3 >> 8) & 0xff;
-			cache[replaceLine].data[15] = (responseData3) & 0xff;
-			cache[replaceLine].tagBit = tagBit;
-			cache[replaceLine].validBit = true;
-		}
-
-		bool hit;
-
-        outport<6> out;
-        inport<17> in;
-	$
-
-	init $
-		cache.resize(NUM_BLOCKS);
-	$
-
-	behavior
-		do
-			wait until (this_phase == 0);
-			$ hasToken = p_inp.peek(requestFromProcessor); $;
-			if(not hasToken) then
-				wait
-			end if;
-
-			if(hasToken) then
-				$ 
-                pulled = p_inp.pull(requestFromProcessor); 
-                sitar::unpack(requestFromProcessor, requestAddr, requestType, requestSize); 
-                responseData0 = 0; 
-                responseData1 = 0; 
-                responseData2 = 0; 
-                responseData3 = 0; 
-                responseErr = 0; 
-                cacheStatus = MISS; 
-                isStatRequest = false;
-
-				if(requestAddr == 0xFFFFFFFF){
-					isStatRequest = true;
-					log << endl << "CACHE STATISTICS";
-					log << endl << "requests=" << statTotal << " hits=" << statHits << " misses=" << statMisses;
-					log << endl << "p_hit=" << (statTotal > 0 ? (double)statHits / statTotal : 0.0);
-				}else if(!isAligned(requestAddr, requestSize)){ 
-                    responseErr = 2; 
-                    log << endl << "Alignment Issue !! Addr=" << requestAddr << " Size=" << requestSize; 
-                }else{
-					cacheStatus = read_cache(requestAddr, requestSize);
-				}
-                $;
-
-			if(cacheStatus == HIT) then
-				$ statTotal++; statHits++; log << endl << "Cache Hit";$;
-			end if;
-
-			if($!isStatRequest && responseErr == 0 && cacheStatus == MISS$) then
-				$ statTotal++; statMisses++; log << endl << "Cache MISS";$;
-
-			wait until (this_phase == 1);
-
-				$
-					uint32_t blockAddr = requestAddr & ~(BLOCK_SIZE-1);
-					sitar::pack(requestToMemory, blockAddr, (uint8_t)LOAD, (uint8_t)std::log2(BLOCK_SIZE/4));
-					ok = false;	
-					$;
-
-				do
-					wait until (this_phase == 1);
-					$ ok = m_outp.push(requestToMemory); $;
-					if(not ok) then
-						wait
-					end if;
-				while(not ok) end do;
-				$ hasToken = false;$;
-				do
-					wait until (this_phase == 0);
-					$ hasToken = m_inp.peek(responseFromMemory); $;
-					if(not hasToken) then
-						wait
-					end if;
-				while(not hasToken) end do;
-
-				$
-					pulled = m_inp.pull(responseFromMemory);
-					sitar::unpack(responseFromMemory, responseErr, responseData0, responseData1, responseData2, responseData3);
-					if(responseErr == 0){
-						write_cache(requestAddr);
-						read_cache(requestAddr, requestSize);
-					}
-					$;
-			end if;
-
-			wait(CACHE_DELAY, 0);
-			$ sitar::pack(responseToProcessor, responseErr, responseData0, responseData1, responseData2, responseData3); $;
-			wait until (this_phase == 1);
-			$ p_outp.push(responseToProcessor); $;
-			end if;
-		while(1) end do;
-	end behavior
-end procedure
-
-
-submodule Core
-    procedure proc: Processor<40, 30>
-    procedure icache: Cache<>
-
-    inport im_inp: width 17
-    inport im_outp: width 6
-    inport dm_inp: width 17
-    inport dm_outp: width 6
-
-	include $#include <cstdlib>$
-	include $#include <vector>$
-	include $#include <cstdint>$
-
-    decl $
+
+        double frand01() {
+            return (rand() % 1000000) / 1000000.0;
+        }
+
+
+        uint32_t genAddress() {
+
+            uint32_t addr;
+
+            if(havePrev && frand01() < SPATIAL_LOCALITY) {
+
+                uint32_t blockStart =
+                    prevAddr & ~((uint32_t)BLOCK_SIZE - 1);
+
+                addr = blockStart +
+                    4 * (uint32_t)(rand() % (BLOCK_SIZE / 4));
+
+            }
+            else if(histCount > 0 &&
+                    frand01() < TEMPORAL_LOCALITY) {
+
+                addr = addrHistory[rand() % histCount];
+
+            }
+            else {
+
+                addr = 4 * (uint32_t)(rand() % (ADDR_SPACE / 4));
+
+            }
+
+            addrHistory[histPos] = addr;
+
+            histPos = (histPos + 1) % HISTORY_SIZE;
+
+            if(histCount < HISTORY_SIZE)
+                histCount++;
+
+            prevAddr = addr;
+            havePrev = true;
+
+            return addr;
+        }
+
+
+        int getSizeBytes(int size) {
+
+            if(size == WORD) return 4;
+            if(size == DOUBLEWORD) return 8;
+
+            return 16;
+        }
+
+
+        uint32_t alignAddr(uint32_t addr, int size) {
+
+            if(size == WORD)
+                return addr & ~3u;
+
+            if(size == DOUBLEWORD)
+                return addr & ~7u;
+
+            return addr & ~15u;
+        }
+
+
+        // ----------------------------------------------------
+        // Send requests through shared variables
+        // ----------------------------------------------------
+
+        void sendICacheRequest(
+            uint32_t addr,
+            uint8_t type,
+            uint8_t size
+        ) {
+
+            *ic_req_addr = addr;
+            *ic_req_type = type;
+            *ic_req_size = size;
+
+            *ic_resp_valid = false;
+
+            *ic_req_valid = true;
+        }
+
+
+        void sendDCacheRequest(
+            uint32_t addr,
+            uint8_t type,
+            uint8_t size
+        ) {
+
+            *dc_req_addr = addr;
+            *dc_req_type = type;
+            *dc_req_size = size;
+
+            *dc_resp_valid = false;
+
+            *dc_req_valid = true;
+        }
+
+
+        // ----------------------------------------------------
+        // Print returned data
+        // ----------------------------------------------------
+
+        void printData(int size) {
+
+            int bytes = getSizeBytes(size);
+
+            uint32_t d[4] = {
+                responseData0,
+                responseData1,
+                responseData2,
+                responseData3
+            };
+
+            log << " data=";
+
+            for(int i = 0; i < bytes / 4; i++) {
+
+                log
+                    << ((d[i] >> 24) & 0xff) << " "
+                    << ((d[i] >> 16) & 0xff) << " "
+                    << ((d[i] >> 8) & 0xff) << " "
+                    << (d[i] & 0xff) << " ";
+
+            }
+        }
 
     $
 
-end submodule
 
-submodule Memory
-	parameter int MEMORY_DELAY = 2
-	inport inp : width 6
-	outport outp : width 17
+    init $
 
-	include $#include <cstdlib>$
-	include $#include <vector>$
-	include $#include <cstdint>$
+        instr_count = 0;
 
-	decl $
-		enum MemOpType{ IFETCH = 0, LOAD = 1, STORE = 2, ATOMICLOADSTORE = 3 };
-		enum MemSize{ WORD = 0, DOUBLEWORD = 1, QUADWORD = 2 };
+        histCount = 0;
+        histPos = 0;
 
-		std::vector<uint8_t> mem;
-		token<6> requestFromCache;
-		token<17> responseToCache;
+        prevAddr = 0;
+        havePrev = false;
 
-		uint32_t requestAddr;
-		uint8_t requestType;
-		uint8_t requestSize;
+        TEMPORAL_LOCALITY = 1;
+        SPATIAL_LOCALITY = 0.9;
 
-		uint8_t responseErr;
-		uint32_t responseData0;
-		uint32_t responseData1;
-		uint32_t responseData2;
-		uint32_t responseData3;
+        if(const char* e = std::getenv("TEMPORAL_LOCALITY"))
+            TEMPORAL_LOCALITY = std::atof(e);
 
-		bool pulled;
-		bool ok;
-		bool hasToken;
+        if(const char* e = std::getenv("SPATIAL_LOCALITY"))
+            SPATIAL_LOCALITY = std::atof(e);
 
-		int getSizeBytes(int size){
-			if(size == WORD) return 4;
-			if(size == DOUBLEWORD) return 8;
-			return 16;
-		}
+    $
 
-		bool isAligned(uint32_t addr, int size){
-			if(size == WORD) return (addr & 3) == 0;
-			if(size == DOUBLEWORD) return (addr & 7) == 0;
-			return (addr & 15) == 0;
-		}
 
-		void read_memory(uint32_t addr, int size){
-			responseData0 = 0;
-			responseData1 = 0;
-			responseData2 = 0;
-			responseData3 = 0;
+    behavior
 
-			if(size == WORD){
-				responseData0 = ((mem[addr] & 0xff) << 24) | ((mem[addr+1] & 0xff) << 16) | ((mem[addr+2] & 0xff) << 8) | (mem[addr+3] & 0xff);
-			}
+        do
 
-			if(size == DOUBLEWORD){
-				responseData0 = ((mem[addr] & 0xff) << 24) | ((mem[addr+1] & 0xff) << 16) | ((mem[addr+2] & 0xff) << 8) | (mem[addr+3] & 0xff);
-				responseData1 = ((mem[addr+4] & 0xff) << 24) | ((mem[addr+5] & 0xff) << 16) | ((mem[addr+6] & 0xff) << 8) | (mem[addr+7] & 0xff);
-			}
+            // =================================================
+            // INSTRUCTION FETCH - ICACHE
+            // =================================================
 
-			if(size == QUADWORD){
-				responseData0 = ((mem[addr] & 0xff) << 24) | ((mem[addr+1] & 0xff) << 16) | ((mem[addr+2] & 0xff) << 8) | (mem[addr+3] & 0xff);
-				responseData1 = ((mem[addr+4] & 0xff) << 24) | ((mem[addr+5] & 0xff) << 16) | ((mem[addr+6] & 0xff) << 8) | (mem[addr+7] & 0xff);
-				responseData2 = ((mem[addr+8] & 0xff) << 24) | ((mem[addr+9] & 0xff) << 16) | ((mem[addr+10] & 0xff) << 8) | (mem[addr+11] & 0xff);
-				responseData3 = ((mem[addr+12] & 0xff) << 24) | ((mem[addr+13] & 0xff) << 16) | ((mem[addr+14] & 0xff) << 8) | (mem[addr+15] & 0xff);
-			}
-		}
+            $
+                if(instr_count == 0) {
 
-		void write_word(uint32_t addr, uint32_t data){
-			mem[addr]   = (data >> 24) & 0xff;
-			mem[addr+1] = (data >> 16) & 0xff;
-			mem[addr+2] = (data >> 8)  & 0xff;
-			mem[addr+3] = data & 0xff;
-		}
-	$
+                    log << endl
+                        << "LOCALITY temporal="
+                        << TEMPORAL_LOCALITY
+                        << " spatial="
+                        << SPATIAL_LOCALITY;
 
-	init $
-		mem.resize(1024);
-		for(int i=0;i<1024;i++) mem[i] = i & 0xff;
-	$
+                }
 
-	behavior
-		do
-			wait until (this_phase == 0);
-			$ hasToken = inp.peek(requestFromCache); $;
-			if(not hasToken) then
-				wait
-			end if;
-			if(hasToken) then
-				$ 
-                pulled = inp.pull(requestFromCache); 
-                sitar::unpack(requestFromCache, requestAddr, requestType, requestSize); 
-                responseData0 = 0; 
-                responseData1 = 0; 
-                responseData2 = 0; 
-                responseData3 = 0; 
-                responseErr = 0; 
-                int bytes = getSizeBytes(requestSize); 
-                if(requestAddr + bytes > 1024){ 
-                    responseErr = 1; log << endl << "Memory: OUT OF BOUND !! Addr=" << requestAddr; 
-                }else if(!isAligned(requestAddr, requestSize)){ 
-                    responseErr = 2; 
-                    log << endl << "Alignment Issue !! Addr=" << requestAddr << " Size=" << requestSize; 
-                }else{ 
-                    if(requestType == IFETCH){ 
-                        read_memory(requestAddr, requestSize); 
-                    }else if(requestType == LOAD){ 
-                        read_memory(requestAddr, requestSize); 
-                    }else if(requestType == STORE){ 
-                        write_word(requestAddr, 0xAABBCCDD); 
-                    }else if(requestType == ATOMICLOADSTORE){ 
-                        read_memory(requestAddr, requestSize); 
-                        write_word(requestAddr, 0x11223344); 
-                    } 
-                } 
+                requestType = IFETCH;
+                requestSize = WORD;
+
+                requestAddr =
+                    alignAddr(genAddress(), WORD);
+
+                log << endl
+                    << "IFETCH addr="
+                    << requestAddr;
+
+                sendICacheRequest(
+                    requestAddr,
+                    requestType,
+                    requestSize
+                );
+            $;
+
+
+            // Wait for ICACHE response
+
+            do
+
+                $
+                    hasToken = *ic_resp_valid;
                 $;
 
-			wait(MEMORY_DELAY, 0);
-			$ sitar::pack(responseToCache, responseErr, responseData0, responseData1, responseData2, responseData3); $;
-			wait until (this_phase == 1);
-			$ outp.push(responseToCache); $;
-			end if;
-		while(1) end do;
-	end behavior
-end submodule
+                if(not hasToken) then
+                    wait
+                end if;
+
+            while(not hasToken) end do;
+
+
+            // Consume ICACHE response
+
+            $
+                responseErr = *ic_resp_err;
+
+                responseData0 = *ic_resp_data0;
+                responseData1 = *ic_resp_data1;
+                responseData2 = *ic_resp_data2;
+                responseData3 = *ic_resp_data3;
+
+                *ic_resp_valid = false;
+
+                if(responseErr != 0) {
+
+                    log << endl
+                        << "IFETCH ERROR="
+                        << (int)responseErr;
+
+                }
+                else {
+
+                    log << endl << "IFETCH OK";
+
+                    printData(WORD);
+
+                }
+            $;
+
+
+            // Instruction execution delay
+
+            wait(EXECUTION_DELAY, 0);
+
+
+            $
+                do_load =
+                    (rand() % 100) < P_LOAD;
+
+                do_store =
+                    (rand() % 100) < P_STORE;
+            $;
+
+
+            // =================================================
+            // LOAD - DCACHE
+            // =================================================
+
+            if(do_load) then
+
+                $
+                    requestType = LOAD;
+
+                    requestSize = rand() % 3;
+
+                    requestAddr =
+                        alignAddr(
+                            genAddress(),
+                            requestSize
+                        );
+
+                    log << endl
+                        << "LOAD addr="
+                        << requestAddr
+                        << " size="
+                        << (int)requestSize;
+
+                    sendDCacheRequest(
+                        requestAddr,
+                        requestType,
+                        requestSize
+                    );
+                $;
+
+
+                do
+
+                    $
+                        hasToken = *dc_resp_valid;
+                    $;
+
+                    if(not hasToken) then
+                        wait
+                    end if;
+
+                while(not hasToken) end do;
+
+
+                $
+                    responseErr = *dc_resp_err;
+
+                    responseData0 = *dc_resp_data0;
+                    responseData1 = *dc_resp_data1;
+                    responseData2 = *dc_resp_data2;
+                    responseData3 = *dc_resp_data3;
+
+                    *dc_resp_valid = false;
+
+                    if(responseErr != 0) {
+
+                        log << endl
+                            << "LOAD ERROR="
+                            << (int)responseErr;
+
+                    }
+                    else {
+
+                        log << endl << "LOAD OK";
+
+                        printData(requestSize);
+
+                    }
+                $;
+
+            end if;
+
+
+            // =================================================
+            // STORE - DCACHE
+            // =================================================
+
+            if(do_store) then
+
+                $
+                    requestType = STORE;
+
+                    requestSize = rand() % 3;
+
+                    requestAddr =
+                        alignAddr(
+                            genAddress(),
+                            requestSize
+                        );
+
+                    log << endl
+                        << "STORE addr="
+                        << requestAddr
+                        << " size="
+                        << (int)requestSize;
+
+                    sendDCacheRequest(
+                        requestAddr,
+                        requestType,
+                        requestSize
+                    );
+                $;
+
+
+                do
+
+                    $
+                        hasToken = *dc_resp_valid;
+                    $;
+
+                    if(not hasToken) then
+                        wait
+                    end if;
+
+                while(not hasToken) end do;
+
+
+                $
+                    responseErr = *dc_resp_err;
+
+                    responseData0 = *dc_resp_data0;
+                    responseData1 = *dc_resp_data1;
+                    responseData2 = *dc_resp_data2;
+                    responseData3 = *dc_resp_data3;
+
+                    *dc_resp_valid = false;
+
+                    if(responseErr != 0) {
+
+                        log << endl
+                            << "STORE ERROR="
+                            << (int)responseErr;
+
+                    }
+                    else {
+
+                        log << endl << "STORE OK";
+
+                    }
+                $;
+
+            end if;
+
+
+            // =================================================
+            // INSTRUCTION COMPLETE
+            // =================================================
+
+            $
+                instr_count++;
+
+                log << endl
+                    << "INSTRUCTION "
+                    << instr_count
+                    << " COMPLETE";
+
+                keepRunning =
+                    (instr_count < TOTAL_INSTRUCTIONS) &&
+                    (current_time.cycle() < MAX_TIME);
+            $;
+
+        while(keepRunning) end do;
+
+
+        // =====================================================
+        // REQUEST ICACHE STATISTICS
+        // =====================================================
+
+        $
+            sendICacheRequest(
+                0xFFFFFFFF,
+                IFETCH,
+                WORD
+            );
+        $;
+
+        do
+
+            $
+                hasToken = *ic_resp_valid;
+            $;
+
+            if(not hasToken) then
+                wait
+            end if;
+
+        while(not hasToken) end do;
+
+        $
+            *ic_resp_valid = false;
+        $;
+
+
+        // =====================================================
+        // REQUEST DCACHE STATISTICS
+        // =====================================================
+
+        $
+            sendDCacheRequest(
+                0xFFFFFFFF,
+                IFETCH,
+                WORD
+            );
+        $;
+
+        do
+
+            $
+                hasToken = *dc_resp_valid;
+            $;
+
+            if(not hasToken) then
+                wait
+            end if;
+
+        while(not hasToken) end do;
+
+        $
+            *dc_resp_valid = false;
+
+            if(instr_count >= TOTAL_INSTRUCTIONS) {
+
+                log << endl
+                    << "Completed "
+                    << TOTAL_INSTRUCTIONS
+                    << " instructions";
+
+            }
+            else {
+
+                log << endl
+                    << "TIME LIMIT EXCEEDED at cycle "
+                    << current_time.cycle();
+
+            }
+        $;
+
+        stop simulation;
+
+    end behavior
+
+end procedure
+
+
+
+// ============================================================
+// COMMON CACHE PROCEDURE
+// Used by both ICACHE and DCACHE
+// ============================================================
+
+procedure Cache
+
+    parameter int BLOCK_SIZE = 16
+    parameter int CACHE_DELAY = 4
+    parameter int NUM_BLOCKS = 16
+
+    include $#include <cstdlib>$
+    include $#include <vector>$
+    include $#include <cstdint>$
+    include $#include <cmath>$
+
+    decl $
+
+        enum MemOpType {
+            IFETCH = 0,
+            LOAD = 1,
+            STORE = 2,
+            ATOMICLOADSTORE = 3
+        };
+
+        enum MemSize {
+            WORD = 0,
+            DOUBLEWORD = 1,
+            QUADWORD = 2
+        };
+
+        enum CacheStatus {
+            MISS = -1,
+            HIT = 1
+        };
+
+
+        class CacheLine {
+
+            public:
+
+                bool validBit;
+
+                uint32_t tagBit;
+
+                std::vector<uint8_t> data;
+
+                CacheLine() {
+
+                    validBit = false;
+
+                    tagBit = 0;
+
+                    data.resize(BLOCK_SIZE, 0);
+
+                }
+        };
+
+
+        std::vector<CacheLine> cache;
+
+
+        // ----------------------------------------------------
+        // SHARED PROCESSOR-CACHE INTERFACE
+        // ----------------------------------------------------
+
+        bool req_valid;
+        bool resp_valid;
+
+        uint32_t req_addr;
+
+        uint8_t req_type;
+        uint8_t req_size;
+
+        uint8_t resp_err;
+
+        uint32_t resp_data0;
+        uint32_t resp_data1;
+        uint32_t resp_data2;
+        uint32_t resp_data3;
+
+
+        // ----------------------------------------------------
+        // CACHE-MEMORY INTERFACE
+        // ----------------------------------------------------
+
+        token<6> requestToMemory;
+        token<17> responseFromMemory;
+
+        uint32_t requestAddr;
+
+        uint8_t requestType;
+        uint8_t requestSize;
+
+
+        uint8_t responseErr;
+
+        uint32_t responseData0;
+        uint32_t responseData1;
+        uint32_t responseData2;
+        uint32_t responseData3;
+
+
+        int cacheStatus;
+
+        bool hasToken;
+        bool ok;
+        bool pulled;
+
+        bool isStatRequest;
+
+
+        // Statistics
+
+        long statTotal;
+        long statHits;
+        long statMisses;
+
+
+        // ----------------------------------------------------
+        // HELPERS
+        // ----------------------------------------------------
+
+        int getSizeBytes(int size) {
+
+            if(size == WORD) return 4;
+
+            if(size == DOUBLEWORD) return 8;
+
+            return 16;
+        }
+
+
+        bool isAligned(uint32_t addr, int size) {
+
+            if(size == WORD)
+                return (addr & 3) == 0;
+
+            if(size == DOUBLEWORD)
+                return (addr & 7) == 0;
+
+            return (addr & 15) == 0;
+        }
+
+
+        uint32_t get_tag(uint32_t addr) {
+
+            return addr / BLOCK_SIZE;
+
+        }
+
+
+        uint32_t get_offset(uint32_t addr) {
+
+            return addr % BLOCK_SIZE;
+
+        }
+
+
+        // ----------------------------------------------------
+        // READ CACHE
+        // ----------------------------------------------------
+
+        int read_cache(uint32_t addr, int size) {
+
+            responseData0 = 0;
+            responseData1 = 0;
+            responseData2 = 0;
+            responseData3 = 0;
+
+            uint32_t tagBit = get_tag(addr);
+
+            uint32_t offset = get_offset(addr);
+
+            int bytes = getSizeBytes(size);
+
+            if(offset + bytes > BLOCK_SIZE)
+                return MISS;
+
+
+            for(int i = 0; i < NUM_BLOCKS; i++) {
+
+                if(cache[i].validBit &&
+                   cache[i].tagBit == tagBit) {
+
+                    uint32_t d[4] = {0, 0, 0, 0};
+
+                    for(int j = 0; j < bytes / 4; j++) {
+
+                        int k = offset + j * 4;
+
+                        d[j] =
+                            ((uint32_t)cache[i].data[k] << 24) |
+                            ((uint32_t)cache[i].data[k+1] << 16) |
+                            ((uint32_t)cache[i].data[k+2] << 8) |
+                            ((uint32_t)cache[i].data[k+3]);
+
+                    }
+
+                    responseData0 = d[0];
+                    responseData1 = d[1];
+                    responseData2 = d[2];
+                    responseData3 = d[3];
+
+                    return HIT;
+
+                }
+            }
+
+            return MISS;
+        }
+
+
+        // ----------------------------------------------------
+        // WRITE CACHE
+        // ----------------------------------------------------
+
+        void write_cache(uint32_t addr) {
+
+            uint32_t tagBit = get_tag(addr);
+
+            int replaceLine = rand() % NUM_BLOCKS;
+
+
+            // Find an invalid line first
+
+            for(int i = 0; i < NUM_BLOCKS; i++) {
+
+                if(!cache[i].validBit) {
+
+                    replaceLine = i;
+
+                    break;
+
+                }
+            }
+
+
+            uint32_t d[4] = {
+                responseData0,
+                responseData1,
+                responseData2,
+                responseData3
+            };
+
+
+            for(int i = 0; i < BLOCK_SIZE; i++) {
+
+                int word = i / 4;
+
+                int byte = i % 4;
+
+                cache[replaceLine].data[i] =
+                    (d[word] >> (24 - byte * 8)) & 0xff;
+
+            }
+
+
+            cache[replaceLine].tagBit = tagBit;
+
+            cache[replaceLine].validBit = true;
+
+        }
+
+
+        // ----------------------------------------------------
+        // MEMORY REQUEST
+        // ----------------------------------------------------
+
+        void prepareMemoryRequest(
+            uint32_t addr,
+            uint8_t type,
+            uint8_t size
+        ) {
+
+            sitar::pack(
+                requestToMemory,
+                addr,
+                type,
+                size
+            );
+
+        }
+
+
+        // Pointers to Core's external memory-interface ports.
+        // Core assigns these pointers in its init block.
+        inport<17>* m_inp;
+        outport<6>* m_outp;
+    $
+
+    init $
+
+        cache.resize(NUM_BLOCKS);
+
+        req_valid = false;
+        resp_valid = false;
+
+        req_addr = 0;
+        req_type = 0;
+        req_size = 0;
+
+        resp_err = 0;
+
+        resp_data0 = 0;
+        resp_data1 = 0;
+        resp_data2 = 0;
+        resp_data3 = 0;
+
+        statTotal = 0;
+        statHits = 0;
+        statMisses = 0;
+
+    $
+
+
+    behavior
+
+        do
+
+            // =================================================
+            // WAIT FOR PROCESSOR REQUEST
+            // =================================================
+
+            do
+
+                $
+                    hasToken = req_valid;
+                $;
+
+                if(not hasToken) then
+                    wait
+                end if;
+
+            while(not hasToken) end do;
+
+
+            // =================================================
+            // ACCEPT SHARED REQUEST
+            // =================================================
+
+            $
+                requestAddr = req_addr;
+
+                requestType = req_type;
+
+                requestSize = req_size;
+
+                req_valid = false;
+
+                responseErr = 0;
+
+                responseData0 = 0;
+                responseData1 = 0;
+                responseData2 = 0;
+                responseData3 = 0;
+
+                isStatRequest =
+                    (requestAddr == 0xFFFFFFFF);
+
+            $;
+
+
+            // =================================================
+            // STATISTICS REQUEST
+            // =================================================
+
+            if(isStatRequest) then
+
+                $
+                    log << endl
+                        << "CACHE STATISTICS";
+
+                    log << endl
+                        << "requests="
+                        << statTotal
+                        << " hits="
+                        << statHits
+                        << " misses="
+                        << statMisses;
+
+                    log << endl
+                        << "p_hit="
+                        << (
+                            statTotal > 0
+                            ? (double)statHits / statTotal
+                            : 0.0
+                        );
+                $;
+
+            else
+
+                // =================================================
+                // VALIDATION
+                // =================================================
+
+                if(not isAligned(requestAddr, requestSize)) then
+
+                    $
+                        responseErr = 2;
+
+                        log << endl
+                            << "CACHE ALIGNMENT ERROR "
+                            << requestAddr;
+                    $;
+
+                else
+
+                    // =================================================
+                    // STORE / ATOMIC ACCESS
+                    // Write-through to memory
+                    // =================================================
+
+                    if(requestType == STORE or requestType == ATOMICLOADSTORE) then
+
+                        $
+                            statTotal++;
+                            statMisses++;
+
+                            prepareMemoryRequest(
+                                requestAddr,
+                                requestType,
+                                requestSize
+                            );
+
+                            log << endl
+                                << "CACHE WRITE THROUGH";
+                        $;
+
+
+                        // Push memory request
+
+                        do
+
+                            wait until(this_phase == 1);
+
+                            $
+                                ok = m_outp->push(requestToMemory);
+                            $;
+
+                            if(not ok) then
+                                wait
+                            end if;
+
+                        while(not ok) end do;
+
+
+                        // Wait for memory response
+
+                        do
+
+                            wait until(this_phase == 0);
+
+                            $
+                                hasToken =
+                                    m_inp->peek(responseFromMemory);
+                            $;
+
+                            if(not hasToken) then
+                                wait
+                            end if;
+
+                        while(not hasToken) end do;
+
+
+                        $
+                            pulled =
+                                m_inp->pull(responseFromMemory);
+
+                            sitar::unpack(
+                                responseFromMemory,
+                                responseErr,
+                                responseData0,
+                                responseData1,
+                                responseData2,
+                                responseData3
+                            );
+                        $;
+
+
+                    else
+
+                        // =================================================
+                        // READ / IFETCH / LOAD
+                        // =================================================
+
+                        $
+                            cacheStatus =
+                                read_cache(
+                                    requestAddr,
+                                    requestSize
+                                );
+                        $;
+
+
+                        if(cacheStatus == HIT) then
+
+                            $
+                                statTotal++;
+                                statHits++;
+
+                                log << endl << "Cache HIT";
+                            $;
+
+                        else
+
+                            $
+                                statTotal++;
+                                statMisses++;
+
+                                log << endl << "Cache MISS";
+                            $;
+
+
+                            // Fetch complete cache block
+
+                            $
+                                uint32_t blockAddr =
+                                    requestAddr & ~(BLOCK_SIZE - 1);
+
+                                uint8_t blockSize;
+
+                                if(BLOCK_SIZE == 4)
+                                    blockSize = WORD;
+
+                                else if(BLOCK_SIZE == 8)
+                                    blockSize = DOUBLEWORD;
+
+                                else
+                                    blockSize = QUADWORD;
+
+                                prepareMemoryRequest(
+                                    blockAddr,
+                                    LOAD,
+                                    blockSize
+                                );
+                            $;
+
+
+                            // Send request to memory
+
+                            do
+
+                                wait until(this_phase == 1);
+
+                                $
+                                    ok =
+                                        m_outp->push(requestToMemory);
+                                $;
+
+                                if(not ok) then
+                                    wait
+                                end if;
+
+                            while(not ok) end do;
+
+
+                            // Receive memory response
+
+                            do
+
+                                wait until(this_phase == 0);
+
+                                $
+                                    hasToken =
+                                        m_inp->peek(responseFromMemory);
+                                $;
+
+                                if(not hasToken) then
+                                    wait
+                                end if;
+
+                            while(not hasToken) end do;
+
+
+                            $
+                                pulled =
+                                    m_inp->pull(responseFromMemory);
+
+                                sitar::unpack(
+                                    responseFromMemory,
+                                    responseErr,
+                                    responseData0,
+                                    responseData1,
+                                    responseData2,
+                                    responseData3
+                                );
+
+                                if(responseErr == 0) {
+
+                                    write_cache(requestAddr);
+
+                                    read_cache(
+                                        requestAddr,
+                                        requestSize
+                                    );
+
+                                }
+                            $;
+
+                        end if;
+
+                    end if;
+
+                end if;
+
+            end if;
+
+
+            // =================================================
+            // CACHE DELAY
+            // =================================================
+
+            wait(CACHE_DELAY, 0);
+
+
+            // =================================================
+            // PUBLISH RESPONSE
+            // =================================================
+
+            $
+                resp_err = responseErr;
+
+                resp_data0 = responseData0;
+                resp_data1 = responseData1;
+                resp_data2 = responseData2;
+                resp_data3 = responseData3;
+
+                resp_valid = true;
+            $;
+
+
+            // =================================================
+            // WAIT FOR PROCESSOR TO CONSUME RESPONSE
+            // =================================================
+
+            do
+
+                $
+                    hasToken = resp_valid;
+                $;
+
+                if(hasToken) then
+                    wait
+                end if;
+
+            while(hasToken) end do;
+
+
+        while(1) end do;
+
+    end behavior
+
+end procedure
+
+
+
+// ============================================================
+// CORE
+// Processor + ICACHE + DCACHE
+// ============================================================
+
+module Core
+
+    procedure proc : Processor<40, 30, 3, 1000, 100000, 16>
+
+    procedure icache : Cache<16, 4, 16>
+
+    procedure dcache : Cache<16, 2, 16>
+
+
+    // --------------------------------------------------------
+    // External instruction memory connection
+    // --------------------------------------------------------
+
+    inport im_inp : width 17
+    outport im_outp : width 6
+
+
+    // --------------------------------------------------------
+    // External data memory connection
+    // --------------------------------------------------------
+
+    inport dm_inp : width 17
+    outport dm_outp : width 6
+
+
+    decl $
+    $
+
+
+    // --------------------------------------------------------
+    // CONNECT SHARED VARIABLES
+    // --------------------------------------------------------
+
+    init $
+
+        // Give each cache direct access to Core's external memory ports.
+        // This avoids incorrectly connecting multiple ports to one net.
+        icache.m_inp = &im_inp;
+        icache.m_outp = &im_outp;
+
+        dcache.m_inp = &dm_inp;
+        dcache.m_outp = &dm_outp;
+
+        // Processor <-> ICACHE
+
+        proc.ic_req_valid = &icache.req_valid;
+        proc.ic_resp_valid = &icache.resp_valid;
+
+        proc.ic_req_addr = &icache.req_addr;
+        proc.ic_req_type = &icache.req_type;
+        proc.ic_req_size = &icache.req_size;
+
+        proc.ic_resp_err = &icache.resp_err;
+
+        proc.ic_resp_data0 = &icache.resp_data0;
+        proc.ic_resp_data1 = &icache.resp_data1;
+        proc.ic_resp_data2 = &icache.resp_data2;
+        proc.ic_resp_data3 = &icache.resp_data3;
+
+
+        // Processor <-> DCACHE
+
+        proc.dc_req_valid = &dcache.req_valid;
+        proc.dc_resp_valid = &dcache.resp_valid;
+
+        proc.dc_req_addr = &dcache.req_addr;
+        proc.dc_req_type = &dcache.req_type;
+        proc.dc_req_size = &dcache.req_size;
+
+        proc.dc_resp_err = &dcache.resp_err;
+
+        proc.dc_resp_data0 = &dcache.resp_data0;
+        proc.dc_resp_data1 = &dcache.resp_data1;
+        proc.dc_resp_data2 = &dcache.resp_data2;
+        proc.dc_resp_data3 = &dcache.resp_data3;
+
+    $
+
+
+    // --------------------------------------------------------
+    // PARALLEL EXECUTION
+    // --------------------------------------------------------
+
+    behavior
+
+        [
+            run proc
+            ||
+            run icache
+            ||
+            run dcache
+        ];
+
+    end behavior
+
+end module
+
+
+
+// ============================================================
+// MEMORY
+// Same Memory implementation for IM and DM
+// ============================================================
+
+module Memory
+
+    parameter int MEMORY_DELAY = 2
+
+    inport inp : width 6
+    outport outp : width 17
+
+
+    include $#include <cstdlib>$
+    include $#include <vector>$
+    include $#include <cstdint>$
+
+
+    decl $
+
+        enum MemOpType {
+            IFETCH = 0,
+            LOAD = 1,
+            STORE = 2,
+            ATOMICLOADSTORE = 3
+        };
+
+        enum MemSize {
+            WORD = 0,
+            DOUBLEWORD = 1,
+            QUADWORD = 2
+        };
+
+
+        std::vector<uint8_t> mem;
+
+
+        token<6> requestFromCache;
+        token<17> responseToCache;
+
+
+        uint32_t requestAddr;
+
+        uint8_t requestType;
+        uint8_t requestSize;
+
+
+        uint8_t responseErr;
+
+        uint32_t responseData0;
+        uint32_t responseData1;
+        uint32_t responseData2;
+        uint32_t responseData3;
+
+
+        bool pulled;
+        bool ok;
+        bool hasToken;
+
+
+        int getSizeBytes(int size) {
+
+            if(size == WORD) return 4;
+
+            if(size == DOUBLEWORD) return 8;
+
+            return 16;
+        }
+
+
+        bool isAligned(uint32_t addr, int size) {
+
+            if(size == WORD)
+                return (addr & 3) == 0;
+
+            if(size == DOUBLEWORD)
+                return (addr & 7) == 0;
+
+            return (addr & 15) == 0;
+        }
+
+
+        // ----------------------------------------------------
+        // READ MEMORY
+        // ----------------------------------------------------
+
+        void read_memory(uint32_t addr, int size) {
+
+            responseData0 = 0;
+            responseData1 = 0;
+            responseData2 = 0;
+            responseData3 = 0;
+
+            uint32_t d[4] = {0, 0, 0, 0};
+
+            int bytes = getSizeBytes(size);
+
+            for(int i = 0; i < bytes / 4; i++) {
+
+                int k = addr + i * 4;
+
+                d[i] =
+                    ((uint32_t)mem[k] << 24) |
+                    ((uint32_t)mem[k+1] << 16) |
+                    ((uint32_t)mem[k+2] << 8) |
+                    ((uint32_t)mem[k+3]);
+
+            }
+
+            responseData0 = d[0];
+            responseData1 = d[1];
+            responseData2 = d[2];
+            responseData3 = d[3];
+
+        }
+
+
+        // ----------------------------------------------------
+        // WRITE WORD
+        // ----------------------------------------------------
+
+        void write_word(uint32_t addr, uint32_t data) {
+
+            mem[addr] =
+                (data >> 24) & 0xff;
+
+            mem[addr+1] =
+                (data >> 16) & 0xff;
+
+            mem[addr+2] =
+                (data >> 8) & 0xff;
+
+            mem[addr+3] =
+                data & 0xff;
+
+        }
+
+    $
+
+
+    init $
+
+        mem.resize(1024);
+
+        for(int i = 0; i < 1024; i++)
+            mem[i] = i & 0xff;
+
+    $
+
+
+    behavior
+
+        do
+
+            // Wait for request
+
+            wait until(this_phase == 0);
+
+            $
+                hasToken =
+                    inp.peek(requestFromCache);
+            $;
+
+            if(not hasToken) then
+                wait
+            end if;
+
+
+            if(hasToken) then
+
+                $
+                    pulled =
+                        inp.pull(requestFromCache);
+
+                    sitar::unpack(
+                        requestFromCache,
+                        requestAddr,
+                        requestType,
+                        requestSize
+                    );
+
+
+                    responseData0 = 0;
+                    responseData1 = 0;
+                    responseData2 = 0;
+                    responseData3 = 0;
+
+                    responseErr = 0;
+
+                    int bytes =
+                        getSizeBytes(requestSize);
+
+
+                    // Boundary check
+
+                    if(requestAddr + bytes > 1024) {
+
+                        responseErr = 1;
+
+                        log << endl
+                            << "Memory: OUT OF BOUNDS "
+                            << "Addr="
+                            << requestAddr;
+
+                    }
+
+                    // Alignment check
+
+                    else if(!isAligned(
+                        requestAddr,
+                        requestSize
+                    )) {
+
+                        responseErr = 2;
+
+                        log << endl
+                            << "Memory: ALIGNMENT ERROR "
+                            << "Addr="
+                            << requestAddr;
+
+                    }
+
+                    else {
+
+                        // IFETCH
+
+                        if(requestType == IFETCH) {
+
+                            read_memory(
+                                requestAddr,
+                                requestSize
+                            );
+
+                        }
+
+                        // LOAD
+
+                        else if(requestType == LOAD) {
+
+                            read_memory(
+                                requestAddr,
+                                requestSize
+                            );
+
+                        }
+
+                        // STORE
+
+                        else if(requestType == STORE) {
+
+                            write_word(
+                                requestAddr,
+                                0xAABBCCDD
+                            );
+
+                        }
+
+                        // ATOMIC LOAD STORE
+
+                        else if(requestType == ATOMICLOADSTORE) {
+
+                            read_memory(
+                                requestAddr,
+                                requestSize
+                            );
+
+                            write_word(
+                                requestAddr,
+                                0x11223344
+                            );
+
+                        }
+
+                    }
+
+                $;
+
+
+                // Memory latency
+
+                wait(MEMORY_DELAY, 0);
+
+
+                // Send response
+
+                $
+                    sitar::pack(
+                        responseToCache,
+                        responseErr,
+                        responseData0,
+                        responseData1,
+                        responseData2,
+                        responseData3
+                    );
+                $;
+
+
+                do
+
+                    wait until(this_phase == 1);
+
+                    $
+                        ok =
+                            outp.push(responseToCache);
+                    $;
+
+                    if(not ok) then
+                        wait
+                    end if;
+
+                while(not ok) end do;
+
+            end if;
+
+        while(1) end do;
+
+    end behavior
+
+end module

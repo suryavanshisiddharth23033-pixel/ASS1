@@ -4,7 +4,7 @@
 	//======================================
 	//file Processor.h                                                  
 	//Describes procedure Processor                                      
-	//Auto-generated from input file "model.sitar" on 2026-10-30 at time 18:12:14   
+	//Auto-generated from input file "model.sitar" on 2026-10-30 at time 21:49:21   
 	 //(This design unit is parameterized. Generating code into a .h file only) 
 	
 	//======================================
@@ -16,51 +16,18 @@
 	#include"sitar_time.h"
 	//user included files
 	 
-#include"CacheAccess.h"
-#include"CacheAccess.h"
-//----code block from file model.sitar, line:190 ----
+//----code block from file model.sitar, line:38 ----
 #include <cstdlib>
 //----end code block-------
 
-//----code block from file model.sitar, line:191 ----
-
-    #ifndef CACHE_IFACE_H_
-    #define CACHE_IFACE_H_
-    #include <cstdint>
-    #include <cstring>
-    #include <string>
-    #include <sstream>
-    #include <iomanip>
-    // Access types: 0 IFETCH, 1 LOAD, 2 STORE, 3 ATOMICLOADSTORE
-    // Size codes  : 0 WORD (4B), 1 DOUBLEWORD (8B), 2 QUADWORD (16B)
-    struct CacheIface {
-        uint32_t      req_addr;
-        int           req_type;
-        int           req_size;
-        uint64_t      req_seq;       // incremented by the processor per request
-        uint64_t      resp_seq;      // set equal to req_seq by the cache when done
-        int           resp_error;
-        unsigned char resp_data[16];
-        unsigned long n_requests, n_hits, n_misses;
-        CacheIface() : req_addr(0), req_type(0), req_size(0), req_seq(0),
-                       resp_seq(0), resp_error(0), n_requests(0), n_hits(0), n_misses(0)
-        { memset(resp_data, 0, sizeof(resp_data)); }
-    };
-    // bytes printed lowest address first (big-endian view)
-    inline std::string hexbytes(const unsigned char* p, int n) {
-        std::ostringstream s;
-        s << std::hex << std::setfill('0');
-        for (int i = 0; i < n; i++) s << std::setw(2) << (unsigned)p[i] << (i + 1 < n ? " " : "");
-        return s.str();
-    }
-    #endif
-    
+//----code block from file model.sitar, line:39 ----
+#include <cstdint>
 //----end code block-------
 
 
 	namespace sitar{
 
-	template<int BLOCK_SIZE=16,int MEM_SIZE=4096>
+	template<int P_LOAD=40,int P_STORE=30,int EXECUTION_DELAY=3,int TOTAL_INSTRUCTIONS=1000,int MAX_TIME=100000,int BLOCK_SIZE=16>
 	class Processor:public module
 	{
 
@@ -75,9 +42,9 @@
 			
 			//Auto-generated variables for recording state in behavior block
 			private:
-			static const unsigned int _num_pointers=5; //total pointers used by this module
-			static const unsigned int _num_timers=1;  	//total timers used by this module
-			static const unsigned int _num_if_flags=3; //total if_flags used
+			static const unsigned int _num_pointers=14; //total pointers used by this module
+			static const unsigned int _num_timers=6;  	//total timers used by this module
+			static const unsigned int _num_if_flags=7; //total if_flags used
 			
 			//State holders 
 			//the +1 for array size is to avoid zero-sized arrays
@@ -90,34 +57,219 @@
 			//other declarations
 			public:
 			 
-CacheAccess fetch;
-CacheAccess dacc;
-//----code block from file model.sitar, line:224 ----
+//----code block from file model.sitar, line:41 ----
 
-    CacheIface  *ic;                 // set by Core
-    CacheIface  *dc;
-    int          EXECUTION_DELAY;
-    double       P_LOAD, P_STORE;
-    unsigned int TOTAL_INSTRUCTIONS;
-    bool         SEQ_DATA;
-    unsigned int SEED;
-    uint32_t     pc, dptr;
-    unsigned int n_done;
-    bool         do_load, do_store;
+        enum MemOpType {
+            IFETCH = 0,
+            LOAD = 1,
+            STORE = 2,
+            ATOMICLOADSTORE = 3
+        };
 
-    inline double rnd01() { return (double)rand() / ((double)RAND_MAX + 1.0); }
+        enum MemSize {
+            WORD = 0,
+            DOUBLEWORD = 1,
+            QUADWORD = 2
+        };
 
-    // choose an aligned data address and an access size
-    inline void pick_data(uint32_t &a, int &s) {
-        if (SEQ_DATA) {                       // sequential words: 0,4,8,...
-            s = 0; a = dptr; dptr = (dptr + 4) % MEM_SIZE;
-        } else {
-            int max_code = (BLOCK_SIZE >= 16) ? 2 : (BLOCK_SIZE >= 8) ? 1 : 0;
-            s = rand() % (max_code + 1);
-            uint32_t nb = 4u << s;
-            a = ((uint32_t)rand() % MEM_SIZE) & ~(nb - 1);   // alignment rule
+        int instr_count;
+
+        uint32_t requestAddr;
+        uint8_t requestType;
+        uint8_t requestSize;
+
+        uint8_t responseErr;
+        uint32_t responseData0;
+        uint32_t responseData1;
+        uint32_t responseData2;
+        uint32_t responseData3;
+
+        bool hasToken;
+        bool keepRunning;
+
+        bool do_load;
+        bool do_store;
+
+        double TEMPORAL_LOCALITY;
+        double SPATIAL_LOCALITY;
+
+        static const uint32_t ADDR_SPACE = 1024;
+        static const int HISTORY_SIZE = 8;
+
+        uint32_t addrHistory[HISTORY_SIZE];
+
+        int histCount;
+        int histPos;
+
+        uint32_t prevAddr;
+        bool havePrev;
+
+        // ----------------------------------------------------
+        // ICACHE shared-variable pointers
+        // ----------------------------------------------------
+
+        bool *ic_req_valid;
+        bool *ic_resp_valid;
+
+        uint32_t *ic_req_addr;
+        uint8_t *ic_req_type;
+        uint8_t *ic_req_size;
+
+        uint8_t *ic_resp_err;
+
+        uint32_t *ic_resp_data0;
+        uint32_t *ic_resp_data1;
+        uint32_t *ic_resp_data2;
+        uint32_t *ic_resp_data3;
+
+        // ----------------------------------------------------
+        // DCACHE shared-variable pointers
+        // ----------------------------------------------------
+
+        bool *dc_req_valid;
+        bool *dc_resp_valid;
+
+        uint32_t *dc_req_addr;
+        uint8_t *dc_req_type;
+        uint8_t *dc_req_size;
+
+        uint8_t *dc_resp_err;
+
+        uint32_t *dc_resp_data0;
+        uint32_t *dc_resp_data1;
+        uint32_t *dc_resp_data2;
+        uint32_t *dc_resp_data3;
+
+
+        double frand01() {
+            return (rand() % 1000000) / 1000000.0;
         }
-    }
+
+
+        uint32_t genAddress() {
+
+            uint32_t addr;
+
+            if(havePrev && frand01() < SPATIAL_LOCALITY) {
+
+                uint32_t blockStart =
+                    prevAddr & ~((uint32_t)BLOCK_SIZE - 1);
+
+                addr = blockStart +
+                    4 * (uint32_t)(rand() % (BLOCK_SIZE / 4));
+
+            }
+            else if(histCount > 0 &&
+                    frand01() < TEMPORAL_LOCALITY) {
+
+                addr = addrHistory[rand() % histCount];
+
+            }
+            else {
+
+                addr = 4 * (uint32_t)(rand() % (ADDR_SPACE / 4));
+
+            }
+
+            addrHistory[histPos] = addr;
+
+            histPos = (histPos + 1) % HISTORY_SIZE;
+
+            if(histCount < HISTORY_SIZE)
+                histCount++;
+
+            prevAddr = addr;
+            havePrev = true;
+
+            return addr;
+        }
+
+
+        int getSizeBytes(int size) {
+
+            if(size == WORD) return 4;
+            if(size == DOUBLEWORD) return 8;
+
+            return 16;
+        }
+
+
+        uint32_t alignAddr(uint32_t addr, int size) {
+
+            if(size == WORD)
+                return addr & ~3u;
+
+            if(size == DOUBLEWORD)
+                return addr & ~7u;
+
+            return addr & ~15u;
+        }
+
+
+        // ----------------------------------------------------
+        // Send requests through shared variables
+        // ----------------------------------------------------
+
+        void sendICacheRequest(
+            uint32_t addr,
+            uint8_t type,
+            uint8_t size
+        ) {
+
+            *ic_req_addr = addr;
+            *ic_req_type = type;
+            *ic_req_size = size;
+
+            *ic_resp_valid = false;
+
+            *ic_req_valid = true;
+        }
+
+
+        void sendDCacheRequest(
+            uint32_t addr,
+            uint8_t type,
+            uint8_t size
+        ) {
+
+            *dc_req_addr = addr;
+            *dc_req_type = type;
+            *dc_req_size = size;
+
+            *dc_resp_valid = false;
+
+            *dc_req_valid = true;
+        }
+
+
+        // ----------------------------------------------------
+        // Print returned data
+        // ----------------------------------------------------
+
+        void printData(int size) {
+
+            int bytes = getSizeBytes(size);
+
+            uint32_t d[4] = {
+                responseData0,
+                responseData1,
+                responseData2,
+                responseData3
+            };
+
+            log << " data=";
+
+            for(int i = 0; i < bytes / 4; i++) {
+
+                log
+                    << ((d[i] >> 24) & 0xff) << " "
+                    << ((d[i] >> 16) & 0xff) << " "
+                    << ((d[i] >> 8) & 0xff) << " "
+                    << (d[i] & 0xff) << " ";
+
+            }
+        }
+
     
 //----end code block-------
 
@@ -130,8 +282,8 @@ CacheAccess dacc;
 	
 	namespace sitar{
 	//Constructor
-	template<int BLOCK_SIZE,int MEM_SIZE>
-	Processor<BLOCK_SIZE,MEM_SIZE>::Processor()
+	template<int P_LOAD,int P_STORE,int EXECUTION_DELAY,int TOTAL_INSTRUCTIONS,int MAX_TIME,int BLOCK_SIZE>
+	Processor<P_LOAD,P_STORE,EXECUTION_DELAY,TOTAL_INSTRUCTIONS,MAX_TIME,BLOCK_SIZE>::Processor()
 	{
 		using std::cout;
 		_type="Processor";
@@ -145,28 +297,43 @@ CacheAccess dacc;
 		_reexecute=0;
 	
 		 
-//---Initializing procedure instance fetch---
-fetch.setInstanceId("fetch");
-addProcedure(&fetch,"fetch");
+//----code block from file model.sitar, line:256 ----
 
-//---Initializing procedure instance dacc---
-dacc.setInstanceId("dacc");
-addProcedure(&dacc,"dacc");
 
-//----code block from file model.sitar, line:250 ----
+        instr_count = 0;
 
-    ic = nullptr; dc = nullptr;
-    EXECUTION_DELAY = 1; P_LOAD = 0; P_STORE = 0; TOTAL_INSTRUCTIONS = 10;
-    SEQ_DATA = false; SEED = 1; pc = 0; dptr = 0; n_done = 0;
-    do_load = false; do_store = false;
+        histCount = 0;
+        histPos = 0;
+
+        prevAddr = 0;
+        havePrev = false;
+
+        TEMPORAL_LOCALITY = 1;
+        SPATIAL_LOCALITY = 0.9;
+
+        if(const char* e = std::getenv("TEMPORAL_LOCALITY"))
+            TEMPORAL_LOCALITY = std::atof(e);
+
+        if(const char* e = std::getenv("SPATIAL_LOCALITY"))
+            SPATIAL_LOCALITY = std::atof(e);
+
     
 //----end code block-------
 
-_pointer_last_value[2]=2;
-_pointer_last_value[3]=3;
+_pointer_last_value[3]=2;
+_pointer_last_value[2]=3;
+_pointer_last_value[6]=2;
+_pointer_last_value[5]=3;
 _pointer_last_value[4]=3;
-_pointer_last_value[1]=13;
-_pointer_last_value[0]=4;
+_pointer_last_value[9]=2;
+_pointer_last_value[8]=3;
+_pointer_last_value[7]=3;
+_pointer_last_value[1]=11;
+_pointer_last_value[11]=2;
+_pointer_last_value[10]=3;
+_pointer_last_value[13]=2;
+_pointer_last_value[12]=3;
+_pointer_last_value[0]=8;
 	}
 
 
@@ -176,8 +343,8 @@ _pointer_last_value[0]=4;
 	
 
 	//runBehavior 
-	template<int BLOCK_SIZE,int MEM_SIZE>
-	void  Processor<BLOCK_SIZE,MEM_SIZE>::runBehavior(const time& current_time)
+	template<int P_LOAD,int P_STORE,int EXECUTION_DELAY,int TOTAL_INSTRUCTIONS,int MAX_TIME,int BLOCK_SIZE>
+	void  Processor<P_LOAD,P_STORE,EXECUTION_DELAY,TOTAL_INSTRUCTIONS,MAX_TIME,BLOCK_SIZE>::runBehavior(const time& current_time)
 	{
 		(void)current_time; //shut up compiler warning if variable is unused
 		using std::cout;
@@ -197,25 +364,9 @@ _pointer_last_value[0]=4;
 switch(_pointer[0])
 {
 
-case 0:
-{ 
- 
-//code_block_statement 
-//----code block from file model.sitar, line:258 ----
-
-        fetch.ifc = ic;          // wire the access helpers to ICACHE / DCACHE
-        dacc.ifc  = dc;
-        srand(SEED);
-        pc = 0; dptr = 0; n_done = 0;
-        
-//----end code block-------
-
- _incrementPointer(0);
-}
-
-case 1 :
+case 0 :
 {
-//do-while statement , line:265
+//do-while statement , line:280
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -227,95 +378,94 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file model.sitar, line:266 ----
-log << endl << "[PROC] ===== instruction " << n_done << " begin =====";
+//----code block from file model.sitar, line:286 ----
+
+                if(instr_count == 0) {
+
+                    log << endl
+                        << "LOCALITY temporal="
+                        << TEMPORAL_LOCALITY
+                        << " spatial="
+                        << SPATIAL_LOCALITY;
+
+                }
+
+                requestType = IFETCH;
+                requestSize = WORD;
+
+                requestAddr =
+                    alignAddr(genAddress(), WORD);
+
+                log << endl
+                    << "IFETCH addr="
+                    << requestAddr;
+
+                sendICacheRequest(
+                    requestAddr,
+                    requestType,
+                    requestSize
+                );
+            
 //----end code block-------
 
  _incrementPointer(1);
+}
+
+case 1 :
+{
+//do-while statement , line:317
+ int _dowhile_iteration;
+for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
+{
+//execute the sequence  
+switch(_pointer[2])
+{
+
+case 0:
+{ 
+ 
+//code_block_statement 
+//----code block from file model.sitar, line:319 ----
+
+                    hasToken = *ic_resp_valid;
+                
+//----end code block-------
+
+ _incrementPointer(2);
 }
 
 case 1:
-{ 
- 
-//code_block_statement 
-//----code block from file model.sitar, line:269 ----
-
-            fetch.acc_addr = pc;  fetch.acc_type = 0;  fetch.acc_size = 0;
-            pc = (pc + 4) % MEM_SIZE;
-            log << endl << "[PROC] IFETCH issue  addr=" << fetch.acc_addr;
-            
-//----end code block-------
-
- _incrementPointer(1);
-}
-
-case 2:
-{ 
- 
-//run procedure statement , line:274
-fetch.run(current_time);
-if(fetch._terminated==1)
-{
-fetch._resetBehavior();
-_incrementPointer(1);
-}
-else
-{
-//procedure has converged, and might
-//need to be re-executed
-if(fetch._reexecute==true)
-_reexecute=true;
-break;
-}
-}
-
-case 3:
-{ 
- 
-//code_block_statement 
-//----code block from file model.sitar, line:275 ----
-
-            log << endl << "[PROC] IFETCH done   addr=" << fetch.acc_addr
-                << " err=" << ic->resp_error
-                << " data=" << hexbytes(ic->resp_data, 4);
-            
-//----end code block-------
-
- _incrementPointer(1);
-}
-
-case 4:
 {
 
-//if statement , line:282
-if((((((EXECUTION_DELAY)>(0))))))
+//if statement , line:323
+if((((!((hasToken))))))
 _if_flag[0]=true;
 else
 _if_flag[0]=false;
- _incrementPointer(1);
+ _incrementPointer(2);
 }
 
-case 5:
+case 2:
 {
 
 if(_if_flag[0]==true)
 {
 
-switch(_pointer[2])
+switch(_pointer[3])
 {
 
 case 0:
 {
 
-//wait-for -time statement , line:283
-_timer[0] = sitar::time(current_time)+sitar::time(((EXECUTION_DELAY)),((0)));
- _incrementPointer(2);
+//wait statement , line:324
+_timer[0] = sitar::time(current_time)+sitar::time(0,1);
+ _incrementPointer(3);
 }
 
 case 1:
 {
 if(current_time>=_timer[0])
- _incrementPointer(2);
+ _incrementPointer(3);
 else
  break; 
 }
@@ -329,117 +479,11 @@ else
 
 }
 
-if((_if_flag[0]==true && _pointer[2]>=_pointer_last_value[2]) || (_if_flag[0]==false))
+if((_if_flag[0]==true && _pointer[3]>=_pointer_last_value[3]) || (_if_flag[0]==false))
 
 {
  //if-statement has terminated
- _incrementPointer(1);
- _pointer[2]=0;
-
-}
-
- else 
- //if-statement has converged
- break;
-}
-
-case 6:
-{ 
- 
-//code_block_statement 
-//----code block from file model.sitar, line:287 ----
-do_load = (rnd01() < P_LOAD);
-//----end code block-------
-
- _incrementPointer(1);
-}
-
-case 7:
-{
-
-//if statement , line:288
-if((((((do_load))))))
-_if_flag[1]=true;
-else
-_if_flag[1]=false;
- _incrementPointer(1);
-}
-
-case 8:
-{
-
-if(_if_flag[1]==true)
-{
-
-switch(_pointer[3])
-{
-
-case 0:
-{ 
- 
-//code_block_statement 
-//----code block from file model.sitar, line:289 ----
-
-                pick_data(dacc.acc_addr, dacc.acc_size);
-                dacc.acc_type = 1;
-                log << endl << "[PROC] LOAD  issue   addr=" << dacc.acc_addr
-                    << " bytes=" << (4 << dacc.acc_size);
-                
-//----end code block-------
-
- _incrementPointer(3);
-}
-
-case 1:
-{ 
- 
-//run procedure statement , line:295
-dacc.run(current_time);
-if(dacc._terminated==1)
-{
-dacc._resetBehavior();
-_incrementPointer(3);
-}
-else
-{
-//procedure has converged, and might
-//need to be re-executed
-if(dacc._reexecute==true)
-_reexecute=true;
-break;
-}
-}
-
-case 2:
-{ 
- 
-//code_block_statement 
-//----code block from file model.sitar, line:296 ----
-
-                log << endl << "[PROC] LOAD  done    addr=" << dacc.acc_addr
-                    << " err=" << dc->resp_error
-                    << " data=" << hexbytes(dc->resp_data, 4 << dacc.acc_size);
-                
-//----end code block-------
-
- _incrementPointer(3);
-}
-
-case 3: break;
-}
-
-}
-
-else
-{
-
-}
-
-if((_if_flag[1]==true && _pointer[3]>=_pointer_last_value[3]) || (_if_flag[1]==false))
-
-{
- //if-statement has terminated
- _incrementPointer(1);
+ _incrementPointer(2);
  _pointer[3]=0;
 
 }
@@ -449,32 +493,126 @@ if((_if_flag[1]==true && _pointer[3]>=_pointer_last_value[3]) || (_if_flag[1]==f
  break;
 }
 
-case 9:
+case 3: break;
+}
+
+if(_pointer[2]< _pointer_last_value[2])  
+break; //sequence has converged  
+ else 
+ if(_pointer[2]==_pointer_last_value[2] && ((((!((hasToken)))))==true))
+ {
+//re-activate the sequence	
+_pointer[2]=0;	
+_reexecute=1;       	
+}				
+else break; //sequence has terminated			
+ };
+	//For loop will finish if									
+	//the sequence inside do-while loop converges                                                   
+	//OR the expression becomes false at the end of some execution of while loop                    
+	//OR  if the iteration limit is exceeded.                                                       
+	if (_dowhile_iteration>SITAR_ITERATION_LIMIT)   
+	{                                                                                               
+		//iteration limit exceeded. Throw error and                                             
+		//terminate the do-while statement                                                      
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:317 in file model.sitar";
+		_pointer[2]=0;                                                               
+		_incrementPointer(1);                                                                    
+	}                                                                                              
+	else if(_pointer[2]<_pointer_last_value[2])                                    
+	{                                                                                               
+		//sequence just converged;                                                              
+		break;                                                                                  
+	}                                                                                               
+	else if (_pointer[2]==_pointer_last_value[2] && ((((!((hasToken)))))==false))  
+	{                                                                                               
+		//terminate the do-while statement                                                      
+		_pointer[2]=0;                                                               
+		_incrementPointer(1);                                                                    
+	} ;                                                                                              
+};                                                                                                   
+case 2:
 { 
  
 //code_block_statement 
-//----code block from file model.sitar, line:304 ----
-do_store = (rnd01() < P_STORE);
+//----code block from file model.sitar, line:332 ----
+
+                responseErr = *ic_resp_err;
+
+                responseData0 = *ic_resp_data0;
+                responseData1 = *ic_resp_data1;
+                responseData2 = *ic_resp_data2;
+                responseData3 = *ic_resp_data3;
+
+                *ic_resp_valid = false;
+
+                if(responseErr != 0) {
+
+                    log << endl
+                        << "IFETCH ERROR="
+                        << (int)responseErr;
+
+                }
+                else {
+
+                    log << endl << "IFETCH OK";
+
+                    printData(WORD);
+
+                }
+            
 //----end code block-------
 
  _incrementPointer(1);
 }
 
-case 10:
+case 3:
 {
 
-//if statement , line:305
-if((((((do_store))))))
-_if_flag[2]=true;
-else
-_if_flag[2]=false;
+//wait-for -time statement , line:361
+_timer[1] = sitar::time(current_time)+sitar::time(((EXECUTION_DELAY)),((0)));
  _incrementPointer(1);
 }
 
-case 11:
+case 4:
+{
+if(current_time>=_timer[1])
+ _incrementPointer(1);
+else
+ break; 
+}
+case 5:
+{ 
+ 
+//code_block_statement 
+//----code block from file model.sitar, line:364 ----
+
+                do_load =
+                    (rand() % 100) < P_LOAD;
+
+                do_store =
+                    (rand() % 100) < P_STORE;
+            
+//----end code block-------
+
+ _incrementPointer(1);
+}
+
+case 6:
 {
 
-if(_if_flag[2]==true)
+//if statement , line:377
+if((((((do_load))))))
+_if_flag[1]=true;
+else
+_if_flag[1]=false;
+ _incrementPointer(1);
+}
+
+case 7:
+{
+
+if(_if_flag[1]==true)
 {
 
 switch(_pointer[4])
@@ -484,46 +622,184 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file model.sitar, line:306 ----
+//----code block from file model.sitar, line:379 ----
 
-                pick_data(dacc.acc_addr, dacc.acc_size);
-                dacc.acc_type = 2;
-                log << endl << "[PROC] STORE issue   addr=" << dacc.acc_addr
-                    << " bytes=" << (4 << dacc.acc_size);
+                    requestType = LOAD;
+
+                    requestSize = rand() % 3;
+
+                    requestAddr =
+                        alignAddr(
+                            genAddress(),
+                            requestSize
+                        );
+
+                    log << endl
+                        << "LOAD addr="
+                        << requestAddr
+                        << " size="
+                        << (int)requestSize;
+
+                    sendDCacheRequest(
+                        requestAddr,
+                        requestType,
+                        requestSize
+                    );
                 
 //----end code block-------
 
  _incrementPointer(4);
 }
 
-case 1:
+case 1 :
+{
+//do-while statement , line:404
+ int _dowhile_iteration;
+for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
+{
+//execute the sequence  
+switch(_pointer[5])
+{
+
+case 0:
 { 
  
-//run procedure statement , line:312
-dacc.run(current_time);
-if(dacc._terminated==1)
-{
-dacc._resetBehavior();
-_incrementPointer(4);
-}
-else
-{
-//procedure has converged, and might
-//need to be re-executed
-if(dacc._reexecute==true)
-_reexecute=true;
-break;
-}
+//code_block_statement 
+//----code block from file model.sitar, line:406 ----
+
+                        hasToken = *dc_resp_valid;
+                    
+//----end code block-------
+
+ _incrementPointer(5);
 }
 
+case 1:
+{
+
+//if statement , line:410
+if((((!((hasToken))))))
+_if_flag[2]=true;
+else
+_if_flag[2]=false;
+ _incrementPointer(5);
+}
+
+case 2:
+{
+
+if(_if_flag[2]==true)
+{
+
+switch(_pointer[6])
+{
+
+case 0:
+{
+
+//wait statement , line:411
+_timer[2] = sitar::time(current_time)+sitar::time(0,1);
+ _incrementPointer(6);
+}
+
+case 1:
+{
+if(current_time>=_timer[2])
+ _incrementPointer(6);
+else
+ break; 
+}
+case 2: break;
+}
+
+}
+
+else
+{
+
+}
+
+if((_if_flag[2]==true && _pointer[6]>=_pointer_last_value[6]) || (_if_flag[2]==false))
+
+{
+ //if-statement has terminated
+ _incrementPointer(5);
+ _pointer[6]=0;
+
+}
+
+ else 
+ //if-statement has converged
+ break;
+}
+
+case 3: break;
+}
+
+if(_pointer[5]< _pointer_last_value[5])  
+break; //sequence has converged  
+ else 
+ if(_pointer[5]==_pointer_last_value[5] && ((((!((hasToken)))))==true))
+ {
+//re-activate the sequence	
+_pointer[5]=0;	
+_reexecute=1;       	
+}				
+else break; //sequence has terminated			
+ };
+	//For loop will finish if									
+	//the sequence inside do-while loop converges                                                   
+	//OR the expression becomes false at the end of some execution of while loop                    
+	//OR  if the iteration limit is exceeded.                                                       
+	if (_dowhile_iteration>SITAR_ITERATION_LIMIT)   
+	{                                                                                               
+		//iteration limit exceeded. Throw error and                                             
+		//terminate the do-while statement                                                      
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:404 in file model.sitar";
+		_pointer[5]=0;                                                               
+		_incrementPointer(4);                                                                    
+	}                                                                                              
+	else if(_pointer[5]<_pointer_last_value[5])                                    
+	{                                                                                               
+		//sequence just converged;                                                              
+		break;                                                                                  
+	}                                                                                               
+	else if (_pointer[5]==_pointer_last_value[5] && ((((!((hasToken)))))==false))  
+	{                                                                                               
+		//terminate the do-while statement                                                      
+		_pointer[5]=0;                                                               
+		_incrementPointer(4);                                                                    
+	} ;                                                                                              
+};                                                                                                   
 case 2:
 { 
  
 //code_block_statement 
-//----code block from file model.sitar, line:313 ----
+//----code block from file model.sitar, line:417 ----
 
-                log << endl << "[PROC] STORE done    addr=" << dacc.acc_addr
-                    << " err=" << dc->resp_error;
+                    responseErr = *dc_resp_err;
+
+                    responseData0 = *dc_resp_data0;
+                    responseData1 = *dc_resp_data1;
+                    responseData2 = *dc_resp_data2;
+                    responseData3 = *dc_resp_data3;
+
+                    *dc_resp_valid = false;
+
+                    if(responseErr != 0) {
+
+                        log << endl
+                            << "LOAD ERROR="
+                            << (int)responseErr;
+
+                    }
+                    else {
+
+                        log << endl << "LOAD OK";
+
+                        printData(requestSize);
+
+                    }
                 
 //----end code block-------
 
@@ -540,7 +816,7 @@ else
 
 }
 
-if((_if_flag[2]==true && _pointer[4]>=_pointer_last_value[4]) || (_if_flag[2]==false))
+if((_if_flag[1]==true && _pointer[4]>=_pointer_last_value[4]) || (_if_flag[1]==false))
 
 {
  //if-statement has terminated
@@ -554,27 +830,265 @@ if((_if_flag[2]==true && _pointer[4]>=_pointer_last_value[4]) || (_if_flag[2]==f
  break;
 }
 
-case 12:
+case 8:
+{
+
+//if statement , line:450
+if((((((do_store))))))
+_if_flag[3]=true;
+else
+_if_flag[3]=false;
+ _incrementPointer(1);
+}
+
+case 9:
+{
+
+if(_if_flag[3]==true)
+{
+
+switch(_pointer[7])
+{
+
+case 0:
 { 
  
 //code_block_statement 
-//----code block from file model.sitar, line:319 ----
+//----code block from file model.sitar, line:452 ----
 
-            n_done++;
-            log << endl << "[PROC] ===== instruction " << n_done << " complete =====";
+                    requestType = STORE;
+
+                    requestSize = rand() % 3;
+
+                    requestAddr =
+                        alignAddr(
+                            genAddress(),
+                            requestSize
+                        );
+
+                    log << endl
+                        << "STORE addr="
+                        << requestAddr
+                        << " size="
+                        << (int)requestSize;
+
+                    sendDCacheRequest(
+                        requestAddr,
+                        requestType,
+                        requestSize
+                    );
+                
+//----end code block-------
+
+ _incrementPointer(7);
+}
+
+case 1 :
+{
+//do-while statement , line:477
+ int _dowhile_iteration;
+for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
+{
+//execute the sequence  
+switch(_pointer[8])
+{
+
+case 0:
+{ 
+ 
+//code_block_statement 
+//----code block from file model.sitar, line:479 ----
+
+                        hasToken = *dc_resp_valid;
+                    
+//----end code block-------
+
+ _incrementPointer(8);
+}
+
+case 1:
+{
+
+//if statement , line:483
+if((((!((hasToken))))))
+_if_flag[4]=true;
+else
+_if_flag[4]=false;
+ _incrementPointer(8);
+}
+
+case 2:
+{
+
+if(_if_flag[4]==true)
+{
+
+switch(_pointer[9])
+{
+
+case 0:
+{
+
+//wait statement , line:484
+_timer[3] = sitar::time(current_time)+sitar::time(0,1);
+ _incrementPointer(9);
+}
+
+case 1:
+{
+if(current_time>=_timer[3])
+ _incrementPointer(9);
+else
+ break; 
+}
+case 2: break;
+}
+
+}
+
+else
+{
+
+}
+
+if((_if_flag[4]==true && _pointer[9]>=_pointer_last_value[9]) || (_if_flag[4]==false))
+
+{
+ //if-statement has terminated
+ _incrementPointer(8);
+ _pointer[9]=0;
+
+}
+
+ else 
+ //if-statement has converged
+ break;
+}
+
+case 3: break;
+}
+
+if(_pointer[8]< _pointer_last_value[8])  
+break; //sequence has converged  
+ else 
+ if(_pointer[8]==_pointer_last_value[8] && ((((!((hasToken)))))==true))
+ {
+//re-activate the sequence	
+_pointer[8]=0;	
+_reexecute=1;       	
+}				
+else break; //sequence has terminated			
+ };
+	//For loop will finish if									
+	//the sequence inside do-while loop converges                                                   
+	//OR the expression becomes false at the end of some execution of while loop                    
+	//OR  if the iteration limit is exceeded.                                                       
+	if (_dowhile_iteration>SITAR_ITERATION_LIMIT)   
+	{                                                                                               
+		//iteration limit exceeded. Throw error and                                             
+		//terminate the do-while statement                                                      
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:477 in file model.sitar";
+		_pointer[8]=0;                                                               
+		_incrementPointer(7);                                                                    
+	}                                                                                              
+	else if(_pointer[8]<_pointer_last_value[8])                                    
+	{                                                                                               
+		//sequence just converged;                                                              
+		break;                                                                                  
+	}                                                                                               
+	else if (_pointer[8]==_pointer_last_value[8] && ((((!((hasToken)))))==false))  
+	{                                                                                               
+		//terminate the do-while statement                                                      
+		_pointer[8]=0;                                                               
+		_incrementPointer(7);                                                                    
+	} ;                                                                                              
+};                                                                                                   
+case 2:
+{ 
+ 
+//code_block_statement 
+//----code block from file model.sitar, line:490 ----
+
+                    responseErr = *dc_resp_err;
+
+                    responseData0 = *dc_resp_data0;
+                    responseData1 = *dc_resp_data1;
+                    responseData2 = *dc_resp_data2;
+                    responseData3 = *dc_resp_data3;
+
+                    *dc_resp_valid = false;
+
+                    if(responseErr != 0) {
+
+                        log << endl
+                            << "STORE ERROR="
+                            << (int)responseErr;
+
+                    }
+                    else {
+
+                        log << endl << "STORE OK";
+
+                    }
+                
+//----end code block-------
+
+ _incrementPointer(7);
+}
+
+case 3: break;
+}
+
+}
+
+else
+{
+
+}
+
+if((_if_flag[3]==true && _pointer[7]>=_pointer_last_value[7]) || (_if_flag[3]==false))
+
+{
+ //if-statement has terminated
+ _incrementPointer(1);
+ _pointer[7]=0;
+
+}
+
+ else 
+ //if-statement has converged
+ break;
+}
+
+case 10:
+{ 
+ 
+//code_block_statement 
+//----code block from file model.sitar, line:521 ----
+
+                instr_count++;
+
+                log << endl
+                    << "INSTRUCTION "
+                    << instr_count
+                    << " COMPLETE";
+
+                keepRunning =
+                    (instr_count < TOTAL_INSTRUCTIONS) &&
+                    (current_time.cycle() < MAX_TIME);
             
 //----end code block-------
 
  _incrementPointer(1);
 }
 
-case 13: break;
+case 11: break;
 }
 
 if(_pointer[1]< _pointer_last_value[1])  
 break; //sequence has converged  
  else 
- if(_pointer[1]==_pointer_last_value[1] && ((((((n_done)<(TOTAL_INSTRUCTIONS)))))==true))
+ if(_pointer[1]==_pointer_last_value[1] && ((((((keepRunning)))))==true))
  {
 //re-activate the sequence	
 _pointer[1]=0;	
@@ -590,7 +1104,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:265 in file model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:280 in file model.sitar";
 		_pointer[1]=0;                                                               
 		_incrementPointer(0);                                                                    
 	}                                                                                              
@@ -599,41 +1113,338 @@ else break; //sequence has terminated
 		//sequence just converged;                                                              
 		break;                                                                                  
 	}                                                                                               
-	else if (_pointer[1]==_pointer_last_value[1] && ((((((n_done)<(TOTAL_INSTRUCTIONS)))))==false))  
+	else if (_pointer[1]==_pointer_last_value[1] && ((((((keepRunning)))))==false))  
 	{                                                                                               
 		//terminate the do-while statement                                                      
 		_pointer[1]=0;                                                               
 		_incrementPointer(0);                                                                    
 	} ;                                                                                              
 };                                                                                                   
-case 2:
+case 1:
 { 
  
 //code_block_statement 
-//----code block from file model.sitar, line:326 ----
+//----code block from file model.sitar, line:541 ----
 
-        log << endl << "[PROC] finished " << n_done << " instructions at time " << current_time;
-        log << endl << "[STATS] ICACHE requests=" << ic->n_requests << " hits=" << ic->n_hits
-            << " misses=" << ic->n_misses << " hit_rate="
-            << (ic->n_requests ? (double)ic->n_hits / ic->n_requests : 0.0);
-        log << endl << "[STATS] DCACHE requests=" << dc->n_requests << " hits=" << dc->n_hits
-            << " misses=" << dc->n_misses << " hit_rate="
-            << (dc->n_requests ? (double)dc->n_hits / dc->n_requests : 0.0);
+            sendICacheRequest(
+                0xFFFFFFFF,
+                IFETCH,
+                WORD
+            );
         
 //----end code block-------
 
  _incrementPointer(0);
 }
 
+case 2 :
+{
+//do-while statement , line:549
+ int _dowhile_iteration;
+for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
+{
+//execute the sequence  
+switch(_pointer[10])
+{
+
+case 0:
+{ 
+ 
+//code_block_statement 
+//----code block from file model.sitar, line:551 ----
+
+                hasToken = *ic_resp_valid;
+            
+//----end code block-------
+
+ _incrementPointer(10);
+}
+
+case 1:
+{
+
+//if statement , line:555
+if((((!((hasToken))))))
+_if_flag[5]=true;
+else
+_if_flag[5]=false;
+ _incrementPointer(10);
+}
+
+case 2:
+{
+
+if(_if_flag[5]==true)
+{
+
+switch(_pointer[11])
+{
+
+case 0:
+{
+
+//wait statement , line:556
+_timer[4] = sitar::time(current_time)+sitar::time(0,1);
+ _incrementPointer(11);
+}
+
+case 1:
+{
+if(current_time>=_timer[4])
+ _incrementPointer(11);
+else
+ break; 
+}
+case 2: break;
+}
+
+}
+
+else
+{
+
+}
+
+if((_if_flag[5]==true && _pointer[11]>=_pointer_last_value[11]) || (_if_flag[5]==false))
+
+{
+ //if-statement has terminated
+ _incrementPointer(10);
+ _pointer[11]=0;
+
+}
+
+ else 
+ //if-statement has converged
+ break;
+}
+
+case 3: break;
+}
+
+if(_pointer[10]< _pointer_last_value[10])  
+break; //sequence has converged  
+ else 
+ if(_pointer[10]==_pointer_last_value[10] && ((((!((hasToken)))))==true))
+ {
+//re-activate the sequence	
+_pointer[10]=0;	
+_reexecute=1;       	
+}				
+else break; //sequence has terminated			
+ };
+	//For loop will finish if									
+	//the sequence inside do-while loop converges                                                   
+	//OR the expression becomes false at the end of some execution of while loop                    
+	//OR  if the iteration limit is exceeded.                                                       
+	if (_dowhile_iteration>SITAR_ITERATION_LIMIT)   
+	{                                                                                               
+		//iteration limit exceeded. Throw error and                                             
+		//terminate the do-while statement                                                      
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:549 in file model.sitar";
+		_pointer[10]=0;                                                               
+		_incrementPointer(0);                                                                    
+	}                                                                                              
+	else if(_pointer[10]<_pointer_last_value[10])                                    
+	{                                                                                               
+		//sequence just converged;                                                              
+		break;                                                                                  
+	}                                                                                               
+	else if (_pointer[10]==_pointer_last_value[10] && ((((!((hasToken)))))==false))  
+	{                                                                                               
+		//terminate the do-while statement                                                      
+		_pointer[10]=0;                                                               
+		_incrementPointer(0);                                                                    
+	} ;                                                                                              
+};                                                                                                   
 case 3:
 { 
  
-//stop simulation statement , line:335
+//code_block_statement 
+//----code block from file model.sitar, line:561 ----
+
+            *ic_resp_valid = false;
+        
+//----end code block-------
+
+ _incrementPointer(0);
+}
+
+case 4:
+{ 
+ 
+//code_block_statement 
+//----code block from file model.sitar, line:570 ----
+
+            sendDCacheRequest(
+                0xFFFFFFFF,
+                IFETCH,
+                WORD
+            );
+        
+//----end code block-------
+
+ _incrementPointer(0);
+}
+
+case 5 :
+{
+//do-while statement , line:578
+ int _dowhile_iteration;
+for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
+{
+//execute the sequence  
+switch(_pointer[12])
+{
+
+case 0:
+{ 
+ 
+//code_block_statement 
+//----code block from file model.sitar, line:580 ----
+
+                hasToken = *dc_resp_valid;
+            
+//----end code block-------
+
+ _incrementPointer(12);
+}
+
+case 1:
+{
+
+//if statement , line:584
+if((((!((hasToken))))))
+_if_flag[6]=true;
+else
+_if_flag[6]=false;
+ _incrementPointer(12);
+}
+
+case 2:
+{
+
+if(_if_flag[6]==true)
+{
+
+switch(_pointer[13])
+{
+
+case 0:
+{
+
+//wait statement , line:585
+_timer[5] = sitar::time(current_time)+sitar::time(0,1);
+ _incrementPointer(13);
+}
+
+case 1:
+{
+if(current_time>=_timer[5])
+ _incrementPointer(13);
+else
+ break; 
+}
+case 2: break;
+}
+
+}
+
+else
+{
+
+}
+
+if((_if_flag[6]==true && _pointer[13]>=_pointer_last_value[13]) || (_if_flag[6]==false))
+
+{
+ //if-statement has terminated
+ _incrementPointer(12);
+ _pointer[13]=0;
+
+}
+
+ else 
+ //if-statement has converged
+ break;
+}
+
+case 3: break;
+}
+
+if(_pointer[12]< _pointer_last_value[12])  
+break; //sequence has converged  
+ else 
+ if(_pointer[12]==_pointer_last_value[12] && ((((!((hasToken)))))==true))
+ {
+//re-activate the sequence	
+_pointer[12]=0;	
+_reexecute=1;       	
+}				
+else break; //sequence has terminated			
+ };
+	//For loop will finish if									
+	//the sequence inside do-while loop converges                                                   
+	//OR the expression becomes false at the end of some execution of while loop                    
+	//OR  if the iteration limit is exceeded.                                                       
+	if (_dowhile_iteration>SITAR_ITERATION_LIMIT)   
+	{                                                                                               
+		//iteration limit exceeded. Throw error and                                             
+		//terminate the do-while statement                                                      
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:578 in file model.sitar";
+		_pointer[12]=0;                                                               
+		_incrementPointer(0);                                                                    
+	}                                                                                              
+	else if(_pointer[12]<_pointer_last_value[12])                                    
+	{                                                                                               
+		//sequence just converged;                                                              
+		break;                                                                                  
+	}                                                                                               
+	else if (_pointer[12]==_pointer_last_value[12] && ((((!((hasToken)))))==false))  
+	{                                                                                               
+		//terminate the do-while statement                                                      
+		_pointer[12]=0;                                                               
+		_incrementPointer(0);                                                                    
+	} ;                                                                                              
+};                                                                                                   
+case 6:
+{ 
+ 
+//code_block_statement 
+//----code block from file model.sitar, line:590 ----
+
+            *dc_resp_valid = false;
+
+            if(instr_count >= TOTAL_INSTRUCTIONS) {
+
+                log << endl
+                    << "Completed "
+                    << TOTAL_INSTRUCTIONS
+                    << " instructions";
+
+            }
+            else {
+
+                log << endl
+                    << "TIME LIMIT EXCEEDED at cycle "
+                    << current_time.cycle();
+
+            }
+        
+//----end code block-------
+
+ _incrementPointer(0);
+}
+
+case 7:
+{ 
+ 
+//stop simulation statement , line:610
  _incrementPointer(0);
  stop_simulation();
 }
 
-case 4: break;
+case 8: break;
 }
 
 		
@@ -650,8 +1461,8 @@ case 4: break;
 	}
 	
 	//resetBehavior 
-	template<int BLOCK_SIZE,int MEM_SIZE>
-	void  Processor<BLOCK_SIZE,MEM_SIZE>::_resetBehavior()
+	template<int P_LOAD,int P_STORE,int EXECUTION_DELAY,int TOTAL_INSTRUCTIONS,int MAX_TIME,int BLOCK_SIZE>
+	void  Processor<P_LOAD,P_STORE,EXECUTION_DELAY,TOTAL_INSTRUCTIONS,MAX_TIME,BLOCK_SIZE>::_resetBehavior()
 	{
 		//reset variables used by behavior block
 		for( int i=0;i<int(_num_pointers);i++) _pointer[i]=0;
