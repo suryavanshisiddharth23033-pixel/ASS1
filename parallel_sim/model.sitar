@@ -1,0 +1,199 @@
+module Top
+
+    include $
+    #include <iostream>
+    #include <vector>
+    #include <cstdint>
+    #include <algorithm>
+    #include <omp.h>
+    $
+
+    decl $
+    uint64_t CACHE_SIZE = 16 * 1024;
+    uint64_t BLOCK_SIZE = 16;
+    int ASSOCIATIVITY = 4;
+
+    uint64_t num_sets;
+
+    struct CacheLine {
+        bool valid;
+        uint64_t tag;
+        uint64_t last_used;
+
+        CacheLine() : valid(false), tag(0), last_used(0) {}
+    };
+
+    std::vector<std::vector<CacheLine>> cache;
+
+    uint64_t address_index;
+    uint64_t hits;
+    uint64_t misses;
+
+    int access_delay;
+    int HIT_LATENCY;
+    int MISS_PENALTY;
+    uint64_t NUM_ADDRESSES;
+
+    std::vector<uint64_t> addresses = {
+        0x1000, 0x1004, 0x1008, 0x100C, 0x1010, 0x1014, 0x1018, 0x101C,
+        0x1020, 0x1024, 0x1028, 0x102C, 0x1030, 0x1034, 0x1038, 0x103C,
+        0x1040, 0x1044, 0x1048, 0x104C, 0x1050, 0x1054, 0x1058, 0x105C,
+        0x1060, 0x1064, 0x1068, 0x106C, 0x1070, 0x1074, 0x1078, 0x107C,
+        0x1080, 0x1084, 0x1088, 0x108C, 0x1090, 0x1094, 0x1098, 0x109C,
+        0x10A0, 0x10A4, 0x10A8, 0x10AC, 0x10B0, 0x10B4, 0x10B8, 0x10BC,
+        0x10C0, 0x10C4, 0x10C8, 0x10CC, 0x10D0, 0x10D4, 0x10D8, 0x10DC,
+        0x10E0, 0x10E4, 0x10E8, 0x10EC, 0x10F0, 0x10F4, 0x10F8, 0x10FC,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x3000, 0x3004, 0x3008, 0x300C, 0x3010, 0x3014, 0x3000, 0x3004,
+        0x3000, 0x3004, 0x3008, 0x300C, 0x3010, 0x3014, 0x3000, 0x3004,
+        0x3000, 0x3004, 0x3008, 0x300C, 0x3010, 0x3014, 0x3000, 0x3004,
+        0x3000, 0x3004, 0x3008, 0x300C, 0x3010, 0x3014, 0x3000, 0x3004,
+        0x3000, 0x3004, 0x3008, 0x300C, 0x3010, 0x3014, 0x3000, 0x3004,
+        0x3000, 0x3004, 0x3008, 0x300C, 0x3010, 0x3014, 0x3000, 0x3004,
+        0x3000, 0x3004, 0x3008, 0x300C, 0x3010, 0x3014, 0x3000, 0x3004,
+        0x3000, 0x3004, 0x3008, 0x300C, 0x3010, 0x3014, 0x3000, 0x3004,
+        0x4000, 0x4010, 0x4020, 0x4030, 0x4040, 0x4050, 0x4060, 0x4070,
+        0x4080, 0x4090, 0x40A0, 0x40B0, 0x40C0, 0x40D0, 0x40E0, 0x40F0,
+        0x4100, 0x4110, 0x4120, 0x4130, 0x4140, 0x4150, 0x4160, 0x4170,
+        0x4180, 0x4190, 0x41A0, 0x41B0, 0x41C0, 0x41D0, 0x41E0, 0x41F0,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080,
+        0x2000, 0x2004, 0x2008, 0x200C, 0x2040, 0x2044, 0x2048, 0x2080
+    };
+
+    $
+
+    init $
+    num_sets = CACHE_SIZE / BLOCK_SIZE / ASSOCIATIVITY;
+
+    cache.resize(num_sets);
+    for (uint64_t s = 0; s < num_sets; ++s) {
+        cache[s].resize(ASSOCIATIVITY);
+    }
+
+    address_index = 0;
+    hits = 0;
+    misses = 0;
+
+    HIT_LATENCY = 4;
+    MISS_PENALTY = 40;
+    access_delay = HIT_LATENCY;
+    NUM_ADDRESSES = addresses.size();
+    $
+
+    behavior
+        do
+            $
+            uint64_t address = addresses[address_index];
+
+            uint64_t block_number = address / BLOCK_SIZE;
+            uint64_t set_index = block_number % num_sets;
+            uint64_t tag = block_number / num_sets;
+
+            std::vector<int> way_hit(ASSOCIATIVITY, 0);
+
+            #pragma omp parallel for
+            for (int way = 0; way < ASSOCIATIVITY; ++way) {
+                if (cache[set_index][way].valid &&
+                    cache[set_index][way].tag == tag) {
+                    way_hit[way] = 1;
+                }
+            }
+
+            uint64_t cycle_now =
+                static_cast<uint64_t>(current_time.cycle());
+
+            int hit_way = -1;
+            for (int way = 0; way < ASSOCIATIVITY; ++way) {
+                if (way_hit[way]) {
+                    hit_way = way;
+                    break;
+                }
+            }
+
+            if (hit_way != -1) {
+                ++hits;
+                cache[set_index][hit_way].last_used = cycle_now;
+                access_delay = HIT_LATENCY;
+
+                std::cout << "Cycle " << cycle_now << " | HIT  | Address: 0x" << std::hex << address << std::dec << "\n";
+            } else {
+                ++misses;
+
+                int replace_way = -1;
+
+                for (int way = 0; way < ASSOCIATIVITY; ++way) {
+                    if (!cache[set_index][way].valid) {
+                        replace_way = way;
+                        break;
+                    }
+                }
+
+                if (replace_way == -1) {
+                    replace_way = 0;
+                    for (int way = 1; way < ASSOCIATIVITY; ++way) {
+                        if (cache[set_index][way].last_used <
+                            cache[set_index][replace_way].last_used) {
+                            replace_way = way;
+                        }
+                    }
+                }
+
+                cache[set_index][replace_way].valid = true;
+                cache[set_index][replace_way].tag = tag;
+                cache[set_index][replace_way].last_used = cycle_now;
+
+                access_delay = HIT_LATENCY + MISS_PENALTY;
+
+                std::cout << "Cycle " << cycle_now << " | MISS | Address: 0x" << std::hex << address << std::dec << " | Set: " << set_index << " | Way: " << replace_way << "\n";
+            }
+
+            ++address_index;
+            $;
+
+            // Suspend the module for the modeled access latency.
+            wait(access_delay, 0);
+
+        while (address_index < NUM_ADDRESSES) end do;
+
+        $
+        double total_accesses = static_cast<double>(hits + misses);
+        double hit_rate = total_accesses > 0
+                        ? 100.0 * hits / total_accesses : 0.0;
+        double miss_rate = total_accesses > 0
+                         ? 100.0 * misses / total_accesses : 0.0;
+
+        std::cout << "\nCACHE RESULTS--------------------\n";
+        std::cout << "Cache size: " << CACHE_SIZE << " bytes\n";
+        std::cout << "Block size: " << BLOCK_SIZE << " bytes\n";
+        std::cout << "Associativity: " << ASSOCIATIVITY << "-way\n";
+        std::cout << "Number of sets: " << num_sets << "\n";
+        std::cout << "Total accesses: " << hits + misses << "\n";
+        std::cout << "Hits: " << hits << "\n";
+        std::cout << "Misses: " << misses << "\n";
+        std::cout << "Hit rate: " << hit_rate << "%\n";
+        std::cout << "Miss rate: " << miss_rate << "%\n";
+        std::cout << "Hit latency: " << HIT_LATENCY << " cycles\n";
+        std::cout << "Miss penalty: " << MISS_PENALTY
+                  << " additional cycles\n";
+        std::cout << "Total modeled access cycles: "
+                  << hits * HIT_LATENCY
+                     + misses * (HIT_LATENCY + MISS_PENALTY)
+                  << "\n";
+        $;
+
+        stop simulation;
+    end behavior
+
+end module
