@@ -22,14 +22,10 @@ module Top
 end module
 
 
-// ============================================================
-// PROCESSOR
-// ============================================================
-
+// Processor module that generates memory requests
 procedure Processor
 
     parameter int P_LOAD = 40
-    parameter int P_STORE = 30
     parameter int EXECUTION_DELAY = 3
     parameter int TOTAL_INSTRUCTIONS = 1000
     parameter int MAX_TIME = 100000
@@ -84,10 +80,7 @@ procedure Processor
         uint32_t prevAddr;
         bool havePrev;
 
-        // ----------------------------------------------------
-        // ICACHE shared-variable pointers
-        // ----------------------------------------------------
-
+        // Pointers to icache shared variables
         bool *ic_req_valid;
         bool *ic_resp_valid;
 
@@ -102,10 +95,7 @@ procedure Processor
         uint32_t *ic_resp_data2;
         uint32_t *ic_resp_data3;
 
-        // ----------------------------------------------------
-        // DCACHE shared-variable pointers
-        // ----------------------------------------------------
-
+        // Pointers to dcache shared variables
         bool *dc_req_valid;
         bool *dc_resp_valid;
 
@@ -186,10 +176,7 @@ procedure Processor
         }
 
 
-        // ----------------------------------------------------
-        // Send requests through shared variables
-        // ----------------------------------------------------
-
+        // Send request to instruction cache
         void sendICacheRequest(
             uint32_t addr,
             uint8_t type,
@@ -206,6 +193,7 @@ procedure Processor
         }
 
 
+        // Send request to data cache
         void sendDCacheRequest(
             uint32_t addr,
             uint8_t type,
@@ -222,10 +210,7 @@ procedure Processor
         }
 
 
-        // ----------------------------------------------------
-        // Print returned data
-        // ----------------------------------------------------
-
+        // Print the data we got back
         void printData(int size) {
 
             int bytes = getSizeBytes(size);
@@ -279,11 +264,9 @@ procedure Processor
 
         do
 
-            // =================================================
-            // INSTRUCTION FETCH - ICACHE
-            // =================================================
-
+            // Fetch instruction from icache
             $
+
                 if(instr_count == 0) {
 
                     log << endl
@@ -312,8 +295,7 @@ procedure Processor
             $;
 
 
-            // Wait for ICACHE response
-
+            // Wait for icache to respond
             do
 
                 $
@@ -327,8 +309,7 @@ procedure Processor
             while(not hasToken) end do;
 
 
-            // Consume ICACHE response
-
+            // Grab the response from icache
             $
                 responseErr = *ic_resp_err;
 
@@ -356,10 +337,8 @@ procedure Processor
             $;
 
 
-            // Instruction execution delay
-
+            // Simulate instruction execution time
             wait(EXECUTION_DELAY, 0);
-
 
             $
                 do_load =
@@ -370,10 +349,7 @@ procedure Processor
             $;
 
 
-            // =================================================
-            // LOAD - DCACHE
-            // =================================================
-
+            // Handle load operation
             if(do_load) then
 
                 $
@@ -413,7 +389,6 @@ procedure Processor
 
                 while(not hasToken) end do;
 
-
                 $
                     responseErr = *dc_resp_err;
 
@@ -443,10 +418,7 @@ procedure Processor
             end if;
 
 
-            // =================================================
-            // STORE - DCACHE
-            // =================================================
-
+            // Handle store operation
             if(do_store) then
 
                 $
@@ -486,7 +458,6 @@ procedure Processor
 
                 while(not hasToken) end do;
 
-
                 $
                     responseErr = *dc_resp_err;
 
@@ -514,10 +485,7 @@ procedure Processor
             end if;
 
 
-            // =================================================
-            // INSTRUCTION COMPLETE
-            // =================================================
-
+            // Done with this instruction
             $
                 instr_count++;
 
@@ -534,10 +502,7 @@ procedure Processor
         while(keepRunning) end do;
 
 
-        // =====================================================
-        // REQUEST ICACHE STATISTICS
-        // =====================================================
-
+        // Ask icache for stats
         $
             sendICacheRequest(
                 0xFFFFFFFF,
@@ -563,10 +528,7 @@ procedure Processor
         $;
 
 
-        // =====================================================
-        // REQUEST DCACHE STATISTICS
-        // =====================================================
-
+        // Ask dcache for stats
         $
             sendDCacheRequest(
                 0xFFFFFFFF,
@@ -615,11 +577,7 @@ end procedure
 
 
 
-// ============================================================
-// COMMON CACHE PROCEDURE
-// Used by both ICACHE and DCACHE
-// ============================================================
-
+// Cache procedure used by both icache and dcache
 procedure Cache
 
     parameter int BLOCK_SIZE = 16
@@ -677,10 +635,7 @@ procedure Cache
         std::vector<CacheLine> cache;
 
 
-        // ----------------------------------------------------
-        // SHARED PROCESSOR-CACHE INTERFACE
-        // ----------------------------------------------------
-
+        // Shared variables for processor-cache interface
         bool req_valid;
         bool resp_valid;
 
@@ -697,10 +652,7 @@ procedure Cache
         uint32_t resp_data3;
 
 
-        // ----------------------------------------------------
-        // CACHE-MEMORY INTERFACE
-        // ----------------------------------------------------
-
+        // Interface to memory
         token<6> requestToMemory;
         token<17> responseFromMemory;
 
@@ -708,7 +660,6 @@ procedure Cache
 
         uint8_t requestType;
         uint8_t requestSize;
-
 
         uint8_t responseErr;
 
@@ -727,17 +678,13 @@ procedure Cache
         bool isStatRequest;
 
 
-        // Statistics
-
+        // Statistics tracking
         long statTotal;
         long statHits;
         long statMisses;
 
 
-        // ----------------------------------------------------
-        // HELPERS
-        // ----------------------------------------------------
-
+        // Convert size enum to bytes
         int getSizeBytes(int size) {
 
             if(size == WORD) return 4;
@@ -748,6 +695,7 @@ procedure Cache
         }
 
 
+        // Check if address is properly aligned
         bool isAligned(uint32_t addr, int size) {
 
             if(size == WORD)
@@ -760,6 +708,7 @@ procedure Cache
         }
 
 
+        // Extract tag from address
         uint32_t get_tag(uint32_t addr) {
 
             return addr / BLOCK_SIZE;
@@ -767,6 +716,7 @@ procedure Cache
         }
 
 
+        // Extract offset from address
         uint32_t get_offset(uint32_t addr) {
 
             return addr % BLOCK_SIZE;
@@ -774,10 +724,7 @@ procedure Cache
         }
 
 
-        // ----------------------------------------------------
-        // READ CACHE
-        // ----------------------------------------------------
-
+        // Try to read from cache, returns HIT or MISS
         int read_cache(uint32_t addr, int size) {
 
             responseData0 = 0;
@@ -828,10 +775,7 @@ procedure Cache
         }
 
 
-        // ----------------------------------------------------
-        // WRITE CACHE
-        // ----------------------------------------------------
-
+        // Write a cache block into the cache
         void write_cache(uint32_t addr) {
 
             uint32_t tagBit = get_tag(addr);
@@ -839,8 +783,7 @@ procedure Cache
             int replaceLine = rand() % NUM_BLOCKS;
 
 
-            // Find an invalid line first
-
+            // Look for an empty line first
             for(int i = 0; i < NUM_BLOCKS; i++) {
 
                 if(!cache[i].validBit) {
@@ -880,10 +823,7 @@ procedure Cache
         }
 
 
-        // ----------------------------------------------------
-        // MEMORY REQUEST
-        // ----------------------------------------------------
-
+        // Pack a memory request
         void prepareMemoryRequest(
             uint32_t addr,
             uint8_t type,
@@ -900,8 +840,7 @@ procedure Cache
         }
 
 
-        // Pointers to Core's external memory-interface ports.
-        // Core assigns these pointers in its init block.
+        // Pointers to Core's memory ports
         inport<17>* m_inp;
         outport<6>* m_outp;
     $
@@ -935,10 +874,7 @@ procedure Cache
 
         do
 
-            // =================================================
-            // WAIT FOR PROCESSOR REQUEST
-            // =================================================
-
+            // Wait for processor to send a request
             do
 
                 $
@@ -952,10 +888,7 @@ procedure Cache
             while(not hasToken) end do;
 
 
-            // =================================================
-            // ACCEPT SHARED REQUEST
-            // =================================================
-
+            // Grab the request from processor
             $
                 requestAddr = req_addr;
 
@@ -978,10 +911,7 @@ procedure Cache
             $;
 
 
-            // =================================================
-            // STATISTICS REQUEST
-            // =================================================
-
+            // Handle statistics request
             if(isStatRequest) then
 
                 $
@@ -1007,10 +937,7 @@ procedure Cache
 
             else
 
-                // =================================================
-                // VALIDATION
-                // =================================================
-
+                // Check alignment
                 if(not isAligned(requestAddr, requestSize)) then
 
                     $
@@ -1023,11 +950,7 @@ procedure Cache
 
                 else
 
-                    // =================================================
-                    // STORE / ATOMIC ACCESS
-                    // Write-through to memory
-                    // =================================================
-
+                    // Store goes straight to memory (write-through)
                     if(requestType == STORE or requestType == ATOMICLOADSTORE) then
 
                         $
@@ -1045,8 +968,7 @@ procedure Cache
                         $;
 
 
-                        // Push memory request
-
+                        // Push request to memory
                         do
 
                             wait until(this_phase == 1);
@@ -1063,7 +985,6 @@ procedure Cache
 
 
                         // Wait for memory response
-
                         do
 
                             wait until(this_phase == 0);
@@ -1078,7 +999,6 @@ procedure Cache
                             end if;
 
                         while(not hasToken) end do;
-
 
                         $
                             pulled =
@@ -1097,10 +1017,7 @@ procedure Cache
 
                     else
 
-                        // =================================================
-                        // READ / IFETCH / LOAD
-                        // =================================================
-
+                        // Try to read from cache
                         $
                             cacheStatus =
                                 read_cache(
@@ -1129,8 +1046,7 @@ procedure Cache
                             $;
 
 
-                            // Fetch complete cache block
-
+                            // Need to fetch from memory
                             $
                                 uint32_t blockAddr =
                                     requestAddr & ~(BLOCK_SIZE - 1);
@@ -1155,7 +1071,6 @@ procedure Cache
 
 
                             // Send request to memory
-
                             do
 
                                 wait until(this_phase == 1);
@@ -1172,8 +1087,7 @@ procedure Cache
                             while(not ok) end do;
 
 
-                            // Receive memory response
-
+                            // Get response from memory
                             do
 
                                 wait until(this_phase == 0);
@@ -1188,7 +1102,6 @@ procedure Cache
                                 end if;
 
                             while(not hasToken) end do;
-
 
                             $
                                 pulled =
@@ -1224,17 +1137,11 @@ procedure Cache
             end if;
 
 
-            // =================================================
-            // CACHE DELAY
-            // =================================================
-
+            // Cache access delay
             wait(CACHE_DELAY, 0);
 
 
-            // =================================================
-            // PUBLISH RESPONSE
-            // =================================================
-
+            // Send response back to processor
             $
                 resp_err = responseErr;
 
@@ -1247,10 +1154,7 @@ procedure Cache
             $;
 
 
-            // =================================================
-            // WAIT FOR PROCESSOR TO CONSUME RESPONSE
-            // =================================================
-
+            // Wait for processor to pick up the response
             do
 
                 $
@@ -1272,11 +1176,7 @@ end procedure
 
 
 
-// ============================================================
-// CORE
-// Processor + ICACHE + DCACHE
-// ============================================================
-
+// Core module: processor with icache and dcache
 module Core
 
     procedure proc : Processor<40, 30, 3, 1000, 100000, 16>
@@ -1286,34 +1186,23 @@ module Core
     procedure dcache : Cache<16, 2, 16>
 
 
-    // --------------------------------------------------------
-    // External instruction memory connection
-    // --------------------------------------------------------
-
+    // Instruction memory ports
     inport im_inp : width 17
     outport im_outp : width 6
 
 
-    // --------------------------------------------------------
-    // External data memory connection
-    // --------------------------------------------------------
-
+    // Data memory ports
     inport dm_inp : width 17
     outport dm_outp : width 6
-
 
     decl $
     $
 
 
-    // --------------------------------------------------------
-    // CONNECT SHARED VARIABLES
-    // --------------------------------------------------------
-
+    // Hook up all the shared variables
     init $
 
-        // Give each cache direct access to Core's external memory ports.
-        // This avoids incorrectly connecting multiple ports to one net.
+        // Connect caches to external memory ports
         icache.m_inp = &im_inp;
         icache.m_outp = &im_outp;
 
@@ -1321,7 +1210,6 @@ module Core
         dcache.m_outp = &dm_outp;
 
         // Processor <-> ICACHE
-
         proc.ic_req_valid = &icache.req_valid;
         proc.ic_resp_valid = &icache.resp_valid;
 
@@ -1338,7 +1226,6 @@ module Core
 
 
         // Processor <-> DCACHE
-
         proc.dc_req_valid = &dcache.req_valid;
         proc.dc_resp_valid = &dcache.resp_valid;
 
@@ -1356,10 +1243,7 @@ module Core
     $
 
 
-    // --------------------------------------------------------
-    // PARALLEL EXECUTION
-    // --------------------------------------------------------
-
+    // Run processor and caches in parallel
     behavior
 
         [
@@ -1376,11 +1260,7 @@ end module
 
 
 
-// ============================================================
-// MEMORY
-// Same Memory implementation for IM and DM
-// ============================================================
-
+// Memory module for both instruction and data memory
 module Memory
 
     parameter int MEMORY_DELAY = 2
@@ -1416,12 +1296,10 @@ module Memory
         token<6> requestFromCache;
         token<17> responseToCache;
 
-
         uint32_t requestAddr;
 
         uint8_t requestType;
         uint8_t requestSize;
-
 
         uint8_t responseErr;
 
@@ -1434,7 +1312,6 @@ module Memory
         bool pulled;
         bool ok;
         bool hasToken;
-
 
         int getSizeBytes(int size) {
 
@@ -1458,10 +1335,7 @@ module Memory
         }
 
 
-        // ----------------------------------------------------
-        // READ MEMORY
-        // ----------------------------------------------------
-
+        // Read from memory
         void read_memory(uint32_t addr, int size) {
 
             responseData0 = 0;
@@ -1493,10 +1367,7 @@ module Memory
         }
 
 
-        // ----------------------------------------------------
-        // WRITE WORD
-        // ----------------------------------------------------
-
+        // Write a single word to memory
         void write_word(uint32_t addr, uint32_t data) {
 
             mem[addr] =
@@ -1530,8 +1401,7 @@ module Memory
 
         do
 
-            // Wait for request
-
+            // Wait for a request
             wait until(this_phase == 0);
 
             $
@@ -1542,7 +1412,6 @@ module Memory
             if(not hasToken) then
                 wait
             end if;
-
 
             if(hasToken) then
 
@@ -1569,8 +1438,7 @@ module Memory
                         getSizeBytes(requestSize);
 
 
-                    // Boundary check
-
+                    // Check if address is in bounds
                     if(requestAddr + bytes > 1024) {
 
                         responseErr = 1;
@@ -1582,8 +1450,7 @@ module Memory
 
                     }
 
-                    // Alignment check
-
+                    // Check alignment
                     else if(!isAligned(
                         requestAddr,
                         requestSize
@@ -1600,8 +1467,7 @@ module Memory
 
                     else {
 
-                        // IFETCH
-
+                        // Instruction fetch
                         if(requestType == IFETCH) {
 
                             read_memory(
@@ -1611,8 +1477,7 @@ module Memory
 
                         }
 
-                        // LOAD
-
+                        // Load
                         else if(requestType == LOAD) {
 
                             read_memory(
@@ -1622,8 +1487,7 @@ module Memory
 
                         }
 
-                        // STORE
-
+                        // Store
                         else if(requestType == STORE) {
 
                             write_word(
@@ -1633,8 +1497,7 @@ module Memory
 
                         }
 
-                        // ATOMIC LOAD STORE
-
+                        // Atomic load-store
                         else if(requestType == ATOMICLOADSTORE) {
 
                             read_memory(
@@ -1655,12 +1518,10 @@ module Memory
 
 
                 // Memory latency
-
                 wait(MEMORY_DELAY, 0);
 
 
-                // Send response
-
+                // Send response back
                 $
                     sitar::pack(
                         responseToCache,
