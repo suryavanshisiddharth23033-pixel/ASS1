@@ -4,7 +4,7 @@
 	//======================================
 	//file Processor.h                                                  
 	//Describes module Processor                                      
-	//Auto-generated from input file "model.sitar" on 2026-10-4 at time 11:14:16   
+	//Auto-generated from input file "model.sitar" on 2026-11-5 at time 21:41:56   
 	 //(This design unit is parameterized. Generating code into a .h file only) 
 	
 	//======================================
@@ -1638,7 +1638,7 @@ case 6:
  
 //stop simulation statement , line:298
  _incrementPointer(0);
- stop_simulation();
+ stop_simulation(current_time);
 }
 
 case 7: break;
@@ -1653,7 +1653,7 @@ case 7: break;
 			{
 			std::cerr<<"\nERROR:Iteration limit exceeded in behavior block of module Processor.";
 			std::cerr<<"\nModule behavior did not converge within a phase .... stopping simulation";
-			stop_simulation();
+			stop_simulation(current_time);
 			}
 
 		
