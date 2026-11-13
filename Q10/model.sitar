@@ -1937,9 +1937,7 @@ end procedure
 // Core module: Processor + ICACHE + DCACHE (+ one write-back engine each)
 module Core
 
-    procedure proc : Processor<40, 30, 3, 1000, 100000, 16>
-
-    // ICACHE: 4 sets, 4 ways = 16 blocks total (256 bytes)
+    procedure proc : Processor<40, 3 total (256 bytes)
     procedure icache : Cache<4, 4, 16>
 
     // DCACHE: 2 sets, 8 ways = 16 blocks total (256 bytes)
