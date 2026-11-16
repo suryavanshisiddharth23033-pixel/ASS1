@@ -1,7 +1,7 @@
 # Q11 — Phase 1 Report: WB/WT Write Policies & Replacement Policies
 
 **Model file**: `Q11/model.sitar` (derived from `Q10/model.sitar`)
-**Scope**: Completes the `add WB/WT, Replacement Policies` branch of the BTP problem statement (`btp.jpg`, Section 2 — Cache).
+**Scope**: Completes the `add WB/WT, Replacement Policies`.
 
 ---
 

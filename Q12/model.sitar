@@ -1,23 +1,32 @@
 module Top
-    submodule IM : Memory<>
+    submodule IM0 : Memory<>
+    submodule IM1 : Memory<>
     submodule DM : Memory<>
-    submodule C : Core
+    submodule DC : DualCore
 
-    net c_im_request : capacity 1 width 22
-    net im_c_response : capacity 1 width 17
+    net dc0_im0_req : capacity 1 width 22
+    net im0_dc0_resp : capacity 1 width 17
 
-    net c_dm_request : capacity 1 width 22
-    net dm_c_response : capacity 1 width 17
+    net dc1_im1_req : capacity 1 width 22
+    net im1_dc1_resp : capacity 1 width 17
 
-    C.im_inp <= im_c_response
-    IM.outp => im_c_response
-    C.im_outp => c_im_request
-    IM.inp <= c_im_request
+    net dc_dm_req : capacity 1 width 22
+    net dm_dc_resp : capacity 1 width 17
 
-    C.dm_inp <= dm_c_response
-    DM.outp => dm_c_response
-    C.dm_outp => c_dm_request
-    DM.inp <= c_dm_request
+    DC.ic0_im_outp => dc0_im0_req
+    IM0.inp <= dc0_im0_req
+    DC.ic0_im_inp <= im0_dc0_resp
+    IM0.outp => im0_dc0_resp
+
+    DC.ic1_im_outp => dc1_im1_req
+    IM1.inp <= dc1_im1_req
+    DC.ic1_im_inp <= im1_dc1_resp
+    IM1.outp => im1_dc1_resp
+
+    DC.dm_outp => dc_dm_req
+    DM.inp <= dc_dm_req
+    DC.dm_inp <= dm_dc_resp
+    DM.outp => dm_dc_resp
 end module
 
 
@@ -30,6 +39,7 @@ procedure Processor
     parameter int TOTAL_INSTRUCTIONS = 1000
     parameter int MAX_TIME = 100000
     parameter int BLOCK_SIZE = 16
+    parameter int CORE_ID = 0
 
     include $#include <cstdlib>$
     include $#include <cstdint>$
@@ -83,6 +93,8 @@ procedure Processor
         uint32_t prevAddr;
         bool havePrev;
 
+        int coreId;
+
         // ICACHE interface pointers
         bool *ic_req_valid;
         bool *ic_resp_valid;
@@ -112,6 +124,10 @@ procedure Processor
         uint32_t *dc_resp_data1;
         uint32_t *dc_resp_data2;
         uint32_t *dc_resp_data3;
+
+        // Coordinated stop
+        bool *my_done;
+        bool *peer_done;
 
 
         double frand01() {
@@ -251,6 +267,8 @@ procedure Processor
         pLoad = P_LOAD;
         pStore = P_STORE;
 
+        coreId = CORE_ID;
+
         TEMPORAL_LOCALITY = 0.7;
         SPATIAL_LOCALITY = 0.6;
 
@@ -279,7 +297,8 @@ procedure Processor
                 if(instr_count == 0) {
 
                     log << endl
-                        << "LOCALITY temporal="
+                        << "CORE " << coreId
+                        << " LOCALITY temporal="
                         << TEMPORAL_LOCALITY
                         << " spatial="
                         << SPATIAL_LOCALITY
@@ -297,7 +316,7 @@ procedure Processor
                     alignAddr(genAddress(), WORD);
 
                 log << endl
-                    << "IFETCH addr="
+                    << "[C" << coreId << "] IFETCH addr="
                     << requestAddr;
 
                 sendICacheRequest(
@@ -336,13 +355,13 @@ procedure Processor
                 if(responseErr != 0) {
 
                     log << endl
-                        << "IFETCH ERROR="
+                        << "[C" << coreId << "] IFETCH ERROR="
                         << (int)responseErr;
 
                 }
                 else {
 
-                    log << endl << "IFETCH OK";
+                    log << endl << "[C" << coreId << "] IFETCH OK";
 
                     printData(WORD);
 
@@ -362,7 +381,7 @@ procedure Processor
             $;
 
 
-            // LOAD operation (only when a store is NOT also requested)
+            // LOAD operation
             if(do_load and not do_store) then
 
                 $
@@ -377,7 +396,7 @@ procedure Processor
                         );
 
                     log << endl
-                        << "LOAD addr="
+                        << "[C" << coreId << "] LOAD addr="
                         << requestAddr
                         << " size="
                         << (int)requestSize;
@@ -415,13 +434,13 @@ procedure Processor
                     if(responseErr != 0) {
 
                         log << endl
-                            << "LOAD ERROR="
+                            << "[C" << coreId << "] LOAD ERROR="
                             << (int)responseErr;
 
                     }
                     else {
 
-                        log << endl << "LOAD OK";
+                        log << endl << "[C" << coreId << "] LOAD OK";
 
                         printData(requestSize);
 
@@ -431,7 +450,7 @@ procedure Processor
             end if;
 
 
-            // STORE operation (only when a load is NOT also requested)
+            // STORE operation
             if(do_store and not do_load) then
 
                 $
@@ -446,7 +465,7 @@ procedure Processor
                         );
 
                     log << endl
-                        << "STORE addr="
+                        << "[C" << coreId << "] STORE addr="
                         << requestAddr
                         << " size="
                         << (int)requestSize;
@@ -484,13 +503,13 @@ procedure Processor
                     if(responseErr != 0) {
 
                         log << endl
-                            << "STORE ERROR="
+                            << "[C" << coreId << "] STORE ERROR="
                             << (int)responseErr;
 
                     }
                     else {
 
-                        log << endl << "STORE OK";
+                        log << endl << "[C" << coreId << "] STORE OK";
 
                     }
                 $;
@@ -498,7 +517,7 @@ procedure Processor
             end if;
 
 
-            // ATOMIC operation (both load and store requested)
+            // ATOMIC operation
             if(do_load and do_store) then
 
                 $
@@ -513,7 +532,7 @@ procedure Processor
                         );
 
                     log << endl
-                        << "ATOMIC addr="
+                        << "[C" << coreId << "] ATOMIC addr="
                         << requestAddr
                         << " size="
                         << (int)requestSize;
@@ -551,13 +570,13 @@ procedure Processor
                     if(responseErr != 0) {
 
                         log << endl
-                            << "ATOMIC ERROR="
+                            << "[C" << coreId << "] ATOMIC ERROR="
                             << (int)responseErr;
 
                     }
                     else {
 
-                        log << endl << "ATOMIC OK";
+                        log << endl << "[C" << coreId << "] ATOMIC OK";
 
                         printData(WORD);
 
@@ -572,7 +591,7 @@ procedure Processor
                 instr_count++;
 
                 log << endl
-                    << "INSTRUCTION "
+                    << "[C" << coreId << "] INSTRUCTION "
                     << instr_count
                     << " COMPLETE";
 
@@ -634,10 +653,12 @@ procedure Processor
         $
             *dc_resp_valid = false;
 
+            *my_done = true;
+
             if(instr_count >= TOTAL_INSTRUCTIONS) {
 
                 log << endl
-                    << "Completed "
+                    << "[C" << coreId << "] Completed "
                     << TOTAL_INSTRUCTIONS
                     << " instructions";
 
@@ -645,15 +666,41 @@ procedure Processor
             else {
 
                 log << endl
-                    << "TIME LIMIT EXCEEDED at cycle "
+                    << "[C" << coreId << "] TIME LIMIT EXCEEDED at cycle "
                     << current_time.cycle();
 
             }
 
             log << endl
-                << "RESULT instructions="
+                << "[C" << coreId << "] RESULT instructions="
                 << instr_count
                 << " cycles="
+                << current_time.cycle();
+
+            if(!(*peer_done)) {
+                log << endl
+                    << "[C" << coreId << "] Waiting for peer core...";
+            }
+        $;
+
+
+        // Wait for peer to finish
+        do
+
+            $
+                hasToken = *peer_done;
+            $;
+
+            if(not hasToken) then
+                wait
+            end if;
+
+        while(not hasToken) end do;
+
+
+        $
+            log << endl
+                << "[C" << coreId << "] Both cores done. Stopping simulation at cycle "
                 << current_time.cycle();
         $;
 
@@ -666,16 +713,9 @@ end procedure
 
 
 // =====================================================================
-// Set-associative cache with configurable WRITE policy and REPLACEMENT
-// policy (processor-facing part).
-// NUM_SETS: number of sets, NUM_WAYS: associativity,
-// BLOCK_SIZE: bytes per block.
-// REPL_POLICY: 0=RANDOM, 1=LRU, 2=FIFO, 3=LFU
-// WRITE_POLICY: 0=WRITE_BACK (write-allocate),
-//               1=WRITE_THROUGH_ALLOCATE, 2=WRITE_THROUGH_NO_ALLOCATE
-// Writes to memory (dirty-victim write-backs and write-through stores)
-// are performed by the WbEngine procedure through the unified write
-// buffer declared in the section marked WRITE-BACK BUFFER below.
+// Set-associative cache with MSI coherence support.
+// When IS_DCACHE=0: instruction cache, direct memory access (to IM).
+// When IS_DCACHE=1: data cache, bus-based access (through CoherenceBus).
 // =====================================================================
 procedure Cache
 
@@ -685,6 +725,8 @@ procedure Cache
     parameter int CACHE_DELAY = 4
     parameter int REPL_POLICY = 1
     parameter int WRITE_POLICY = 0
+    parameter int CORE_ID = 0
+    parameter int IS_DCACHE = 0
 
     include $#include <cstdlib>$
     include $#include <vector>$
@@ -725,18 +767,18 @@ procedure Cache
         };
 
         enum CoherenceState {
-            INVALID  = 0,   // Line is not valid
-            SHARED   = 1,   // Line is valid, clean, potentially cached by peer
-            MODIFIED = 2    // Line is valid, dirty, exclusively owned by this cache
+            INVALID  = 0,
+            SHARED   = 1,
+            MODIFIED = 2
         };
 
         enum BusCmd {
             BUS_NONE   = 0,
-            BUS_RD     = 1, // Read miss (requests shared copy)
-            BUS_RDX    = 2, // Write miss (requests exclusive copy, invalidates peer)
-            BUS_UPGR   = 3, // Write hit on SHARED line (invalidates peer, no memory fetch)
-            BUS_WB     = 4, // Dirty victim write-back or write-through store to memory
-            BUS_ATOMIC = 5  // Atomic read-modify-write (flushes/invalidates peer first)
+            BUS_RD     = 1,
+            BUS_RDX    = 2,
+            BUS_UPGR   = 3,
+            BUS_WB     = 4,
+            BUS_ATOMIC = 5
         };
 
         class CacheLine {
@@ -745,9 +787,9 @@ procedure Cache
 
                 CoherenceState state;
                 uint32_t tagBit;
-                long lastAccessCycle; // LRU: cycle of most recent access
-                long insertionCycle;  // FIFO: cycle the line was filled
-                long accessCount;     // LFU: number of accesses
+                long lastAccessCycle;
+                long insertionCycle;
+                long accessCount;
                 std::vector<uint8_t> data;
 
                 CacheLine() {
@@ -768,7 +810,7 @@ procedure Cache
         std::vector<std::vector<CacheLine>> cache;
 
 
-        // Processor interface (shared variables)
+        // Processor interface
         bool req_valid;
         bool resp_valid;
 
@@ -784,7 +826,7 @@ procedure Cache
         uint32_t resp_data3;
 
 
-        // Memory interface
+        // Memory interface (used by IS_DCACHE=0, i.e., ICache)
         token<22> requestToMemory;
         token<17> responseFromMemory;
 
@@ -807,18 +849,7 @@ procedure Cache
         bool isStatRequest;
 
 
-        // ---------------- WRITE-BACK BUFFER (shared with WbEngine) ----------------
-        // wbPending : a write is parked in the buffer and has not yet been
-        //             acknowledged by memory. It is either a dirty victim
-        //             block (write-back) or a write-through store.
-        // wbBlockAddr/wbSize/wbData0..3 : address, size and contents of the
-        //             parked write. wbBlockAddr is the block address for a
-        //             victim write-back and the (aligned) request address
-        //             for a write-through store.
-        // memBusy   : mutex for the single memory port.
-        // feWaiting : the cache front end wants the memory port. The engine
-        //             never starts a write-back while this is set, so
-        //             demand fetches have priority over write-back.
+        // WRITE-BACK BUFFER (shared with WbEngine)
         bool wbPending;
         uint32_t wbBlockAddr;
         uint8_t wbSize;
@@ -830,14 +861,14 @@ procedure Cache
         bool feWaiting;
         long statWbDone;
 
-        // Experiment switch: 1 = non-blocking, 0 = blocking (Q9-like)
         int nonBlocking;
 
-        // Policy configuration (copied from parameters, env-overridable)
         int replPolicy;
         int writePolicy;
+        int coreId;
+        int isDcache;
 
-        // Front-end temporaries (must live in decl to be visible in all blocks)
+        // Front-end temporaries
         uint32_t wb_setIdx;
         int wb_victimWay;
         bool wb_needWriteback;
@@ -852,6 +883,42 @@ procedure Cache
         uint32_t wtStoreAddr;
         uint8_t wtStoreSize;
 
+        // Coherence bus channels (used by IS_DCACHE=1)
+        bool bus_req_valid;
+        bool bus_resp_valid;
+        uint8_t bus_req_cmd;
+        uint32_t bus_req_addr;
+        uint8_t bus_req_size;
+        uint32_t bus_req_d0;
+        uint32_t bus_req_d1;
+        uint32_t bus_req_d2;
+        uint32_t bus_req_d3;
+        uint8_t bus_resp_err;
+        uint32_t bus_resp_d0;
+        uint32_t bus_resp_d1;
+        uint32_t bus_resp_d2;
+        uint32_t bus_resp_d3;
+
+        // WB engine bus channels
+        bool wb_bus_req_valid;
+        bool wb_bus_resp_valid;
+        uint32_t wb_bus_addr;
+        uint8_t wb_bus_size;
+        uint32_t wb_bus_d0;
+        uint32_t wb_bus_d1;
+        uint32_t wb_bus_d2;
+        uint32_t wb_bus_d3;
+        uint8_t wb_bus_err;
+
+        // Coherence stats
+        long statBusRd;
+        long statBusRdx;
+        long statBusUpgr;
+        long statInvalidationsRx;
+        long statDirtyInterventions;
+        long statDowngrades;
+        long statBusWaitCycles;
+
         // Statistics
         long statTotal;
         long statHits;
@@ -863,66 +930,42 @@ procedure Cache
         long statBufferStall;
         long statMemWait;
 
+        int hitState;
+        bool upgradeNeeded;
+        bool busDone;
+
 
         int getSizeBytes(int size) {
-
             if(size == WORD) return 4;
             if(size == DOUBLEWORD) return 8;
-
             return 16;
         }
 
-
-        // MemSize code that transfers one whole block
         uint8_t block_size_code() {
-
-            if(BLOCK_SIZE == 4)
-                return WORD;
-
-            if(BLOCK_SIZE == 8)
-                return DOUBLEWORD;
-
+            if(BLOCK_SIZE == 4) return WORD;
+            if(BLOCK_SIZE == 8) return DOUBLEWORD;
             return QUADWORD;
         }
 
-
         bool isAligned(uint32_t addr, int size) {
-
-            if(size == WORD)
-                return (addr & 3) == 0;
-
-            if(size == DOUBLEWORD)
-                return (addr & 7) == 0;
-
+            if(size == WORD) return (addr & 3) == 0;
+            if(size == DOUBLEWORD) return (addr & 7) == 0;
             return (addr & 15) == 0;
         }
 
-
-        // TAG = address / (BLOCK_SIZE * NUM_SETS)
         uint32_t get_tag(uint32_t addr) {
-
             return addr / (BLOCK_SIZE * NUM_SETS);
-
         }
 
-
-        // SET = (address / BLOCK_SIZE) % NUM_SETS
         uint32_t get_set_index(uint32_t addr) {
-
             return (addr / BLOCK_SIZE) % NUM_SETS;
-
         }
-
 
         uint32_t get_offset(uint32_t addr) {
-
             return addr % BLOCK_SIZE;
-
         }
 
-
         int find_way(uint32_t tag, uint32_t setIdx) {
-
             for(int way = 0; way < NUM_WAYS; way++) {
                 if(cache[setIdx][way].isValid() &&
                    cache[setIdx][way].tagBit == tag) {
@@ -933,14 +976,142 @@ procedure Cache
         }
 
 
-        // Read from set-associative cache (fills responseData0..3 on HIT)
-        // touch != 0: update the replacement metadata of the hit line
-        int read_cache(uint32_t addr, int size, int touch, long now) {
+        bool handle_snoop(
+            uint8_t cmd,
+            uint32_t blockAddr,
+            bool &suppliedDirty,
+            uint32_t &dirtyD0,
+            uint32_t &dirtyD1,
+            uint32_t &dirtyD2,
+            uint32_t &dirtyD3
+        ) {
+            uint32_t tag = get_tag(blockAddr);
+            uint32_t setIdx = get_set_index(blockAddr);
+            int way = find_way(tag, setIdx);
+
+            bool hitWbBuf = wbPending &&
+                            ((wbBlockAddr & ~((uint32_t)BLOCK_SIZE - 1)) == blockAddr) &&
+                            (wbSize == block_size_code());
+
+            if(hitWbBuf && way < 0) {
+                suppliedDirty = true;
+                dirtyD0 = wbData0;
+                dirtyD1 = wbData1;
+                dirtyD2 = wbData2;
+                dirtyD3 = wbData3;
+
+                // If the write engine has already submitted this buffer to
+                // the bus, cancel that queued request and acknowledge the
+                // cancellation. Keep wbPending set until WbEngine consumes
+                // the acknowledgement so the one-entry buffer cannot be
+                // reused underneath the in-flight handshake.
+                if(wb_bus_req_valid && !wb_bus_resp_valid) {
+                    wb_bus_req_valid = false;
+                    wb_bus_err = 3; // snoop supplied the data; no memory WB needed
+                    wb_bus_resp_valid = true;
+                }
+                else if(!wb_bus_resp_valid) {
+                    // No write request is outstanding, so the buffer can be
+                    // released immediately after supplying its dirty data.
+                    wbPending = false;
+                    statWbDone++;
+                }
+
+                if(cmd == BUS_RD) {
+                    statDirtyInterventions++;
+                    statDowngrades++;
+                }
+                else if(cmd == BUS_RDX || cmd == BUS_ATOMIC) {
+                    statDirtyInterventions++;
+                    statInvalidationsRx++;
+                }
+                return true;
+            }
+
+            if(way >= 0) {
+                CoherenceState lineState = cache[setIdx][way].state;
+
+                switch(cmd) {
+                    case BUS_RD:
+                        if(lineState == MODIFIED) {
+                            suppliedDirty = true;
+                            read_block_for_writeback(setIdx, way);
+                            dirtyD0 = responseData0;
+                            dirtyD1 = responseData1;
+                            dirtyD2 = responseData2;
+                            dirtyD3 = responseData3;
+                            cache[setIdx][way].state = SHARED;
+                            statDirtyInterventions++;
+                            statDowngrades++;
+                        }
+                        else {
+                            suppliedDirty = false;
+                        }
+                        return true;
+
+                    case BUS_RDX:
+                        if(lineState == MODIFIED) {
+                            suppliedDirty = true;
+                            read_block_for_writeback(setIdx, way);
+                            dirtyD0 = responseData0;
+                            dirtyD1 = responseData1;
+                            dirtyD2 = responseData2;
+                            dirtyD3 = responseData3;
+                            cache[setIdx][way].state = INVALID;
+                            statDirtyInterventions++;
+                            statInvalidationsRx++;
+                        }
+                        else if(lineState == SHARED) {
+                            suppliedDirty = false;
+                            cache[setIdx][way].state = INVALID;
+                            statInvalidationsRx++;
+                        }
+                        return true;
+
+                    case BUS_UPGR:
+                        if(lineState == SHARED) {
+                            suppliedDirty = false;
+                            cache[setIdx][way].state = INVALID;
+                            statInvalidationsRx++;
+                        }
+                        return true;
+
+                    case BUS_ATOMIC:
+                        if(lineState == MODIFIED) {
+                            suppliedDirty = true;
+                            read_block_for_writeback(setIdx, way);
+                            dirtyD0 = responseData0;
+                            dirtyD1 = responseData1;
+                            dirtyD2 = responseData2;
+                            dirtyD3 = responseData3;
+                            cache[setIdx][way].state = INVALID;
+                            statDirtyInterventions++;
+                            statInvalidationsRx++;
+                        }
+                        else if(lineState == SHARED) {
+                            suppliedDirty = false;
+                            cache[setIdx][way].state = INVALID;
+                            statInvalidationsRx++;
+                        }
+                        return true;
+
+                    default:
+                        return false;
+                }
+            }
+
+            suppliedDirty = false;
+            return false;
+        }
+
+
+        int read_cache(uint32_t addr, int size, int touch, long now, int &hitStateOut) {
 
             responseData0 = 0;
             responseData1 = 0;
             responseData2 = 0;
             responseData3 = 0;
+            hitStateOut = INVALID;
 
             uint32_t tag = get_tag(addr);
             uint32_t setIdx = get_set_index(addr);
@@ -951,7 +1122,6 @@ procedure Cache
             if(offset + bytes > BLOCK_SIZE)
                 return MISS;
 
-
             for(int way = 0; way < NUM_WAYS; way++) {
 
                 if(cache[setIdx][way].isValid() &&
@@ -960,15 +1130,12 @@ procedure Cache
                     uint32_t d[4] = {0, 0, 0, 0};
 
                     for(int j = 0; j < bytes / 4; j++) {
-
                         int k = offset + j * 4;
-
                         d[j] =
                             ((uint32_t)cache[setIdx][way].data[k] << 24) |
                             ((uint32_t)cache[setIdx][way].data[k+1] << 16) |
                             ((uint32_t)cache[setIdx][way].data[k+2] << 8) |
                             ((uint32_t)cache[setIdx][way].data[k+3]);
-
                     }
 
                     responseData0 = d[0];
@@ -976,13 +1143,14 @@ procedure Cache
                     responseData2 = d[2];
                     responseData3 = d[3];
 
+                    hitStateOut = cache[setIdx][way].state;
+
                     if(touch) {
                         cache[setIdx][way].lastAccessCycle = now;
                         cache[setIdx][way].accessCount++;
                     }
 
                     return HIT;
-
                 }
             }
 
@@ -990,21 +1158,15 @@ procedure Cache
         }
 
 
-        // Simulated processor write data for a STORE
         void set_store_data() {
-
-            responseData0 = 0xAABBCCDD;
-            responseData1 = 0xAABBCCDD;
-            responseData2 = 0xAABBCCDD;
-            responseData3 = 0xAABBCCDD;
-
+            uint32_t marker = (coreId == 0) ? 0xAAAA0000u : 0xBBBB0000u;
+            responseData0 = marker | (statTotal & 0xFFFF);
+            responseData1 = marker | (statTotal & 0xFFFF);
+            responseData2 = marker | (statTotal & 0xFFFF);
+            responseData3 = marker | (statTotal & 0xFFFF);
         }
 
 
-        // Write responseData into the block at the request offset.
-        // The line becomes dirty only in WRITE_BACK mode; in WRITE_THROUGH
-        // mode the line stays clean because the data is pushed to memory
-        // by the write buffer.
         void write_data_to_cache(uint32_t addr, int size) {
 
             uint32_t setIdx = get_set_index(addr);
@@ -1023,69 +1185,47 @@ procedure Cache
             if(way < 0) return;
 
             for(int i = 0; i < bytes / 4; i++) {
-
                 int k = offset + i * 4;
-
-                cache[setIdx][way].data[k] =
-                    (d[i] >> 24) & 0xff;
-                cache[setIdx][way].data[k+1] =
-                    (d[i] >> 16) & 0xff;
-                cache[setIdx][way].data[k+2] =
-                    (d[i] >> 8) & 0xff;
-                cache[setIdx][way].data[k+3] =
-                    d[i] & 0xff;
-
+                cache[setIdx][way].data[k] = (d[i] >> 24) & 0xff;
+                cache[setIdx][way].data[k+1] = (d[i] >> 16) & 0xff;
+                cache[setIdx][way].data[k+2] = (d[i] >> 8) & 0xff;
+                cache[setIdx][way].data[k+3] = d[i] & 0xff;
             }
 
-            // In WRITE_BACK mode, the line becomes MODIFIED (dirty)
-            // In WRITE_THROUGH mode, the line stays SHARED (clean) because
-            // the data is pushed to memory by the write buffer
             if(writePolicy == WB_WRITE_ALLOCATE) {
                 cache[setIdx][way].state = MODIFIED;
             }
             else if(cache[setIdx][way].state == INVALID) {
-                // If line was INVALID, it should have been filled already
-                // but we set it to SHARED as a fallback
                 cache[setIdx][way].state = SHARED;
             }
-
         }
 
 
-        // Copy a whole block into responseData0..3
         void read_block_for_writeback(uint32_t setIdx, int way) {
 
             uint32_t d[4] = {0, 0, 0, 0};
 
             for(int i = 0; i < BLOCK_SIZE / 4; i++) {
-
                 int k = i * 4;
-
                 d[i] =
                     ((uint32_t)cache[setIdx][way].data[k] << 24) |
                     ((uint32_t)cache[setIdx][way].data[k+1] << 16) |
                     ((uint32_t)cache[setIdx][way].data[k+2] << 8) |
                     ((uint32_t)cache[setIdx][way].data[k+3]);
-
             }
 
             responseData0 = d[0];
             responseData1 = d[1];
             responseData2 = d[2];
             responseData3 = d[3];
-
         }
 
 
         uint32_t get_block_addr_from_tag_set(uint32_t tag, uint32_t setIdx) {
-
             return (tag * NUM_SETS + setIdx) * BLOCK_SIZE;
-
         }
 
 
-        // Pick a way according to replPolicy:
-        // an invalid way wins; otherwise RANDOM / LRU / FIFO / LFU.
         int select_victim_way(uint32_t setIdx) {
 
             for(int way = 0; way < NUM_WAYS; way++) {
@@ -1094,43 +1234,31 @@ procedure Cache
                 }
             }
 
-            if(replPolicy == REPL_RANDOM) {
-                return rand() % NUM_WAYS;
-            }
+            if(replPolicy == REPL_RANDOM) return rand() % NUM_WAYS;
 
             int victim = 0;
 
             if(replPolicy == REPL_LRU) {
-
-                // least-recently-used: oldest lastAccessCycle
                 for(int way = 1; way < NUM_WAYS; way++) {
-
                     if(cache[setIdx][way].lastAccessCycle <
                        cache[setIdx][victim].lastAccessCycle) {
                         victim = way;
                     }
                 }
-
                 return victim;
             }
 
             if(replPolicy == REPL_FIFO) {
-
-                // first-in-first-out: oldest insertionCycle
                 for(int way = 1; way < NUM_WAYS; way++) {
-
                     if(cache[setIdx][way].insertionCycle <
                        cache[setIdx][victim].insertionCycle) {
                         victim = way;
                     }
                 }
-
                 return victim;
             }
 
-            // REPL_LFU: least frequently used; break ties by LRU
             for(int way = 1; way < NUM_WAYS; way++) {
-
                 if(cache[setIdx][way].accessCount <
                    cache[setIdx][victim].accessCount ||
                    (cache[setIdx][way].accessCount ==
@@ -1140,12 +1268,10 @@ procedure Cache
                     victim = way;
                 }
             }
-
             return victim;
         }
 
 
-        // Install the fetched block (in responseData0..3) into replaceWay
         void write_cache(uint32_t addr, int replaceWay, long now) {
 
             uint32_t tag = get_tag(addr);
@@ -1159,13 +1285,10 @@ procedure Cache
             };
 
             for(int i = 0; i < BLOCK_SIZE; i++) {
-
                 int word = i / 4;
                 int byte = i % 4;
-
                 cache[setIdx][replaceWay].data[i] =
                     (d[word] >> (24 - byte * 8)) & 0xff;
-
             }
 
             cache[setIdx][replaceWay].tagBit = tag;
@@ -1173,37 +1296,17 @@ procedure Cache
             cache[setIdx][replaceWay].insertionCycle = now;
             cache[setIdx][replaceWay].lastAccessCycle = now;
             cache[setIdx][replaceWay].accessCount = 1;
-
         }
 
 
-        // Request token: address, type, size, then four data words
-        // (data words are only meaningful for STORE requests)
         void prepareMemoryRequest(
-            uint32_t addr,
-            uint8_t type,
-            uint8_t size,
-            uint32_t d0,
-            uint32_t d1,
-            uint32_t d2,
-            uint32_t d3
+            uint32_t addr, uint8_t type, uint8_t size,
+            uint32_t d0, uint32_t d1, uint32_t d2, uint32_t d3
         ) {
-
-            sitar::pack(
-                requestToMemory,
-                addr,
-                type,
-                size,
-                d0,
-                d1,
-                d2,
-                d3
-            );
-
+            sitar::pack(requestToMemory, addr, type, size, d0, d1, d2, d3);
         }
 
 
-        // Pointers to Core's memory ports
         inport<17>* m_inp;
         outport<22>* m_outp;
     $
@@ -1217,13 +1320,10 @@ procedure Cache
 
         req_valid = false;
         resp_valid = false;
-
         req_addr = 0;
         req_type = 0;
         req_size = 0;
-
         resp_err = 0;
-
         resp_data0 = 0;
         resp_data1 = 0;
         resp_data2 = 0;
@@ -1241,19 +1341,52 @@ procedure Cache
         statWbDone = 0;
 
         nonBlocking = 1;
-
         if(const char* e = std::getenv("NON_BLOCKING"))
             nonBlocking = std::atoi(e);
 
         replPolicy = REPL_POLICY;
-
         if(const char* e = std::getenv("REPL_POLICY"))
             replPolicy = std::atoi(e);
 
         writePolicy = WRITE_POLICY;
-
         if(const char* e = std::getenv("WRITE_POLICY"))
             writePolicy = std::atoi(e);
+
+        coreId = CORE_ID;
+        isDcache = IS_DCACHE;
+
+        bus_req_valid = false;
+        bus_resp_valid = false;
+        bus_req_cmd = 0;
+        bus_req_addr = 0;
+        bus_req_size = 0;
+        bus_req_d0 = 0;
+        bus_req_d1 = 0;
+        bus_req_d2 = 0;
+        bus_req_d3 = 0;
+        bus_resp_err = 0;
+        bus_resp_d0 = 0;
+        bus_resp_d1 = 0;
+        bus_resp_d2 = 0;
+        bus_resp_d3 = 0;
+
+        wb_bus_req_valid = false;
+        wb_bus_resp_valid = false;
+        wb_bus_addr = 0;
+        wb_bus_size = 0;
+        wb_bus_d0 = 0;
+        wb_bus_d1 = 0;
+        wb_bus_d2 = 0;
+        wb_bus_d3 = 0;
+        wb_bus_err = 0;
+
+        statBusRd = 0;
+        statBusRdx = 0;
+        statBusUpgr = 0;
+        statInvalidationsRx = 0;
+        statDirtyInterventions = 0;
+        statDowngrades = 0;
+        statBusWaitCycles = 0;
 
         statTotal = 0;
         statHits = 0;
@@ -1274,226 +1407,143 @@ procedure Cache
 
             // Wait for processor request
             do
-
                 $
                     hasToken = req_valid;
                 $;
-
                 if(not hasToken) then
                     wait
                 end if;
-
             while(not hasToken) end do;
 
-
-            // Accept request from processor
             $
                 requestAddr = req_addr;
                 requestType = req_type;
                 requestSize = req_size;
-
                 req_valid = false;
-
                 responseErr = 0;
-
                 responseData0 = 0;
                 responseData1 = 0;
                 responseData2 = 0;
                 responseData3 = 0;
-
-                isStatRequest =
-                    (requestAddr == 0xFFFFFFFF);
-
+                isStatRequest = (requestAddr == 0xFFFFFFFF);
             $;
 
-
-            // Statistics request
             if(isStatRequest) then
 
                 $
                     log << endl
-                        << "CACHE STATISTICS"
-                        << " (config: sets="
-                        << NUM_SETS
-                        << " ways="
-                        << NUM_WAYS
-                        << " blockSize="
-                        << BLOCK_SIZE
-                        << " nonBlocking="
-                        << nonBlocking
-                        << " repl="
-                        << replPolicy
-                        << " write="
-                        << writePolicy << ")";
+                        << "[C" << coreId << "]"
+                        << (isDcache ? " DCACHE" : " ICACHE")
+                        << " STATISTICS"
+                        << " (config: sets=" << NUM_SETS
+                        << " ways=" << NUM_WAYS
+                        << " blockSize=" << BLOCK_SIZE
+                        << " nonBlocking=" << nonBlocking
+                        << " repl=" << replPolicy
+                        << " write=" << writePolicy << ")";
 
                     log << endl
-                        << "requests="
-                        << statTotal
-                        << " hits="
-                        << statHits
-                        << " misses="
-                        << statMisses
-                        << " writebacks="
-                        << statWritebacks
-                        << " writethroughs="
-                        << statWriteThroughs
-                        << " writebacks_done="
-                        << statWbDone;
+                        << "requests=" << statTotal
+                        << " hits=" << statHits
+                        << " misses=" << statMisses
+                        << " writebacks=" << statWritebacks
+                        << " writethroughs=" << statWriteThroughs
+                        << " writebacks_done=" << statWbDone;
 
                     log << endl
-                        << "hits_under_wb="
-                        << statHitsUnderWB
-                        << " conflict_stall_cycles="
-                        << statConflictStall
-                        << " buffer_stall_cycles="
-                        << statBufferStall
-                        << " mem_wait_cycles="
-                        << statMemWait;
+                        << "hits_under_wb=" << statHitsUnderWB
+                        << " conflict_stall_cycles=" << statConflictStall
+                        << " buffer_stall_cycles=" << statBufferStall
+                        << " mem_wait_cycles=" << statMemWait;
+
+                    if(isDcache) {
+                        log << endl
+                            << "bus_rd=" << statBusRd
+                            << " bus_rdx=" << statBusRdx
+                            << " bus_upgr=" << statBusUpgr
+                            << " invalidations_rx=" << statInvalidationsRx
+                            << " dirty_interventions=" << statDirtyInterventions
+                            << " downgrades=" << statDowngrades
+                            << " bus_wait_cycles=" << statBusWaitCycles;
+
+                        long endM = 0, endS = 0, endI = 0;
+                        for(int s = 0; s < NUM_SETS; s++) {
+                            for(int w = 0; w < NUM_WAYS; w++) {
+                                if(cache[s][w].state == MODIFIED) endM++;
+                                else if(cache[s][w].state == SHARED) endS++;
+                                else endI++;
+                            }
+                        }
+                        log << endl
+                            << "final_state: M=" << endM
+                            << " S=" << endS
+                            << " I=" << endI;
+                    }
 
                     log << endl
                         << "p_hit="
-                        << (
-                            statTotal > 0
-                            ? (double)statHits / statTotal
-                            : 0.0
-                        );
-
-                    log << endl
-                        << "p_writeback_per_miss="
-                        << (
-                            statMisses > 0
-                            ? (double)statWritebacks / statMisses
-                            : 0.0
-                        );
+                        << (statTotal > 0 ? (double)statHits / statTotal : 0.0);
                 $;
 
             else
 
                 if(not isAligned(requestAddr, requestSize)) then
-
                     $
                         responseErr = 2;
-
-                        log << endl
-                            << "CACHE ALIGNMENT ERROR "
-                            << requestAddr;
+                        log << endl << "CACHE ALIGNMENT ERROR " << requestAddr;
                     $;
 
                 else
 
                     if(requestType == ATOMICLOADSTORE) then
 
-                        // Atomics bypass the cache (write-through) but must
-                        // respect the memory port and the block in the buffer.
+                        // ATOMIC: bypass cache, go directly to memory
                         $
                             statTotal++;
                             statMisses++;
-
-                            missBlockAddr =
-                                requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
-
+                            missBlockAddr = requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
                             stallLogged = false;
-
-                            prepareMemoryRequest(
-                                requestAddr,
-                                requestType,
-                                requestSize,
-                                0, 0, 0, 0
-                            );
-
-                            log << endl
-                                << "CACHE ATOMIC WRITE-THROUGH";
+                            prepareMemoryRequest(requestAddr, requestType, requestSize, 0, 0, 0, 0);
+                            log << endl << "[C" << coreId << "] CACHE ATOMIC WRITE-THROUGH";
                         $;
 
-
                         do
-
                             $
-                                conflict =
-                                    wbPending &&
-                                    ((wbBlockAddr & ~((uint32_t)BLOCK_SIZE - 1))
-                                     == missBlockAddr);
-
-                                if(conflict) {
-                                    statConflictStall++;
-                                }
+                                conflict = wbPending &&
+                                    ((wbBlockAddr & ~((uint32_t)BLOCK_SIZE - 1)) == missBlockAddr);
+                                if(conflict) statConflictStall++;
                             $;
-
-                            if(conflict) then
-                                wait
-                            end if;
-
+                            if(conflict) then wait end if;
                         while(conflict) end do;
-
 
                         $
                             feWaiting = true;
                         $;
 
                         do
-
                             $
-                                if(!memBusy) {
-                                    memBusy = true;
-                                    feWaiting = false;
-                                    gotMem = true;
-                                }
-                                else {
-                                    gotMem = false;
-                                    statMemWait++;
-                                }
+                                if(!memBusy) { memBusy = true; feWaiting = false; gotMem = true; }
+                                else { gotMem = false; statMemWait++; }
                             $;
-
-                            if(not gotMem) then
-                                wait
-                            end if;
-
+                            if(not gotMem) then wait end if;
                         while(not gotMem) end do;
 
-
                         do
-
                             wait until(this_phase == 1);
-
-                            $
-                                ok = m_outp->push(requestToMemory);
-                            $;
-
-                            if(not ok) then
-                                wait
-                            end if;
-
+                            $ ok = m_outp->push(requestToMemory); $;
+                            if(not ok) then wait end if;
                         while(not ok) end do;
 
-
                         do
-
                             wait until(this_phase == 0);
-
-                            $
-                                hasToken =
-                                    m_inp->peek(responseFromMemory);
-                            $;
-
-                            if(not hasToken) then
-                                wait
-                            end if;
-
+                            $ hasToken = m_inp->peek(responseFromMemory); $;
+                            if(not hasToken) then wait end if;
                         while(not hasToken) end do;
 
                         $
-                            pulled =
-                                m_inp->pull(responseFromMemory);
-
-                            sitar::unpack(
-                                responseFromMemory,
-                                responseErr,
-                                responseData0,
-                                responseData1,
-                                responseData2,
-                                responseData3
-                            );
-
+                            pulled = m_inp->pull(responseFromMemory);
+                            sitar::unpack(responseFromMemory, responseErr,
+                                responseData0, responseData1, responseData2, responseData3);
                             memBusy = false;
                         $;
 
@@ -1501,135 +1551,204 @@ procedure Cache
 
                         // IFETCH / LOAD / STORE
                         $
-                            cacheStatus =
-                                read_cache(
-                                    requestAddr,
-                                    requestSize,
-                                    1,
-                                    current_time.cycle()
-                                );
+                            cacheStatus = read_cache(requestAddr, requestSize, 1,
+                                current_time.cycle(), hitState);
                         $;
-
 
                         if(cacheStatus == HIT) then
 
-                            // HIT: served immediately, whether or not a
-                            // write-back is in progress. The block under
-                            // write-back is not in the cache (its line was
-                            // invalidated when it was parked), so a hit can
-                            // never touch it.
                             $
                                 statTotal++;
                                 statHits++;
-
                                 wtNeeded = false;
+                                upgradeNeeded = false;
 
                                 if(requestType == STORE) {
 
-                                    set_store_data();
-
-                                    write_data_to_cache(
-                                        requestAddr,
-                                        requestSize
-                                    );
-
-                                    // WRITE_THROUGH policies: the line is
-                                    // left clean and the store is pushed to
-                                    // memory through the write buffer.
-                                    if(writePolicy != WB_WRITE_ALLOCATE) {
-
-                                        wtNeeded = true;
-                                        wtStoreAddr = requestAddr;
-                                        wtStoreSize = requestSize;
-
+                                    if(hitState == SHARED && isDcache) {
+                                        // Need coherence upgrade: S -> M
+                                        upgradeNeeded = true;
                                     }
+                                    else {
+                                        set_store_data();
+                                        write_data_to_cache(requestAddr, requestSize);
 
+                                        if(writePolicy != WB_WRITE_ALLOCATE) {
+                                            wtNeeded = true;
+                                            wtStoreAddr = requestAddr;
+                                            wtStoreSize = requestSize;
+                                        }
+                                    }
                                 }
 
                                 if(wbPending) {
-
                                     statHitsUnderWB++;
-
-                                    log << endl
-                                        << "HIT UNDER WRITE-BACK type="
-                                        << (int)requestType
-                                        << " addr="
-                                        << requestAddr
-                                        << " wbBlock="
-                                        << wbBlockAddr
-                                        << " cycle="
-                                        << current_time.cycle();
-
-                                }
-                                else {
-
-                                    log << endl << "Cache HIT";
-
                                 }
                             $;
 
-
-                            // WRITE-THROUGH store on HIT: park it in the
-                            // unified write buffer for the WbEngine to drain.
-                            if(wtNeeded) then
-
-                                // Only one write at a time: wait for the
-                                // buffer to be free.
-                                do
-
-                                    $
-                                        bufBusy = wbPending;
-
-                                        if(bufBusy) {
-                                            statBufferStall++;
-                                        }
-                                    $;
-
-                                    if(bufBusy) then
-                                        wait
-                                    end if;
-
-                                while(bufBusy) end do;
-
+                            // Coherence upgrade: S -> M via BUS_UPGR
+                            if(upgradeNeeded) then
 
                                 $
-                                    statWriteThroughs++;
-
-                                    wbBlockAddr = wtStoreAddr;
-                                    wbSize = wtStoreSize;
-                                    wbData0 = responseData0;
-                                    wbData1 = responseData1;
-                                    wbData2 = responseData2;
-                                    wbData3 = responseData3;
-
-                                    wbPending = true;
+                                    statBusUpgr++;
+                                    statBusWaitCycles++;
+                                    bus_req_cmd = BUS_UPGR;
+                                    bus_req_addr = requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
+                                    bus_req_valid = true;
 
                                     log << endl
-                                        << "WRITE-THROUGH PARKED addr="
-                                        << wtStoreAddr
-                                        << " size="
-                                        << (int)wtStoreSize
-                                        << " cycle="
-                                        << current_time.cycle();
+                                        << "[C" << coreId << "] BUS_UPGR addr="
+                                        << bus_req_addr;
                                 $;
 
+                                do
+                                    $
+                                        busDone = bus_resp_valid;
+                                        if(!busDone) statBusWaitCycles++;
+                                    $;
+                                    if(not busDone) then wait end if;
+                                while(not busDone) end do;
 
-                                // Blocking mode: do not respond until the
-                                // store has reached memory.
-                                if(nonBlocking == 0) then
+                                $
+                                    bus_resp_valid = false;
+                                    bus_req_valid = false;
 
+                                    // Re-check: peer may have invalidated us while we waited
+                                    int recheckWay = find_way(get_tag(requestAddr),
+                                        get_set_index(requestAddr));
+
+                                    if(recheckWay >= 0 &&
+                                       cache[get_set_index(requestAddr)][recheckWay].state != INVALID) {
+                                        // Still valid, upgrade to MODIFIED
+                                        set_store_data();
+                                        write_data_to_cache(requestAddr, requestSize);
+                                        cache[get_set_index(requestAddr)][recheckWay].state = MODIFIED;
+                                    }
+                                    else {
+                                        // The initial shared hit no longer
+                                        // exists. Count the completed access
+                                        // as a miss and recover with RDX so a
+                                        // modified peer supplies its dirty data.
+                                        statHits--;
+                                        statMisses++;
+                                        cacheStatus = MISS;
+
+                                        // The front end is blocked on this
+                                        // request, so the invalidated victim
+                                        // cannot be replaced locally while the
+                                        // UPGR is outstanding. An invalid way
+                                        // is therefore available for the fill.
+                                        wb_setIdx = get_set_index(requestAddr);
+                                        wb_victimWay = select_victim_way(wb_setIdx);
+
+                                        statBusRdx++;
+                                        bus_req_cmd = BUS_RDX;
+                                        bus_req_addr = requestAddr &
+                                            ~((uint32_t)BLOCK_SIZE - 1);
+                                        bus_req_size = block_size_code();
+                                        bus_req_valid = true;
+
+                                        log << endl << "[C" << coreId
+                                            << "] BUS_UPGR ABORTED addr=" << requestAddr
+                                            << "; retrying as BUS_RDX";
+                                    }
+                                $;
+
+                            end if;
+
+                            // A peer won exclusive ownership while our UPGR
+                            // was queued and invalidated our shared copy. The
+                            // recovery request above is an RDX, so a modified
+                            // peer intervenes with the current block contents.
+                            if(cacheStatus == MISS) then
+                                do
+                                    $
+                                        busDone = bus_resp_valid;
+                                        if(!busDone) statBusWaitCycles++;
+                                    $;
+                                    if(not busDone) then wait end if;
+                                while(not busDone) end do;
+
+                                $
+                                    bus_resp_valid = false;
+                                    bus_req_valid = false;
+                                    responseErr = bus_resp_err;
+                                    responseData0 = bus_resp_d0;
+                                    responseData1 = bus_resp_d1;
+                                    responseData2 = bus_resp_d2;
+                                    responseData3 = bus_resp_d3;
+
+                                    if(responseErr == 0) {
+                                        write_cache(requestAddr, wb_victimWay,
+                                            current_time.cycle());
+                                        set_store_data();
+                                        write_data_to_cache(requestAddr, requestSize);
+                                        cache[wb_setIdx][wb_victimWay].state = MODIFIED;
+
+                                        log << endl << "[C" << coreId
+                                            << "] BUS_UPGR RECOVERED addr=" << requestAddr
+                                            << " via BUS_RDX";
+                                    }
+                                $;
+                            end if;
+
+                            // Only proceed if still a HIT (not downgraded to MISS above)
+                            if(cacheStatus == HIT and not upgradeNeeded) then
+
+                                // WRITE-THROUGH store on HIT
+                                if(wtNeeded) then
                                     do
-
-                                        $
-                                            bufBusy = wbPending;
-                                        $;
-
-                                        if(bufBusy) then
-                                            wait
-                                        end if;
-
+                                        $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                        if(bufBusy) then wait end if;
                                     while(bufBusy) end do;
 
+                                    $
+                                        statWriteThroughs++;
+                                        wbBlockAddr = wtStoreAddr;
+                                        wbSize = wtStoreSize;
+                                        wbData0 = responseData0;
+                                        wbData1 = responseData1;
+                                        wbData2 = responseData2;
+                                        wbData3 = responseData3;
+                                        wbPending = true;
+                                    $;
+
+                                    if(nonBlocking == 0) then
+                                        do
+                                            $ bufBusy = wbPending; $;
+                                            if(bufBusy) then wait end if;
+                                        while(bufBusy) end do;
+                                    end if;
+                                end if;
+
+                            end if;
+
+                            // If upgrade succeeded (cacheStatus still HIT, upgradeNeeded was true)
+                            if(cacheStatus == HIT and upgradeNeeded) then
+
+                                if(wtNeeded) then
+                                    do
+                                        $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                        if(bufBusy) then wait end if;
+                                    while(bufBusy) end do;
+
+                                    $
+                                        statWriteThroughs++;
+                                        wbBlockAddr = wtStoreAddr;
+                                        wbSize = wtStoreSize;
+                                        wbData0 = responseData0;
+                                        wbData1 = responseData1;
+                                        wbData2 = responseData2;
+                                        wbData3 = responseData3;
+                                        wbPending = true;
+                                    $;
+
+                                    if(nonBlocking == 0) then
+                                        do
+                                            $ bufBusy = wbPending; $;
+                                            if(bufBusy) then wait end if;
+                                        while(bufBusy) end do;
+                                    end if;
                                 end if;
 
                             end if;
@@ -1640,495 +1759,269 @@ procedure Cache
                             $
                                 statTotal++;
                                 statMisses++;
-
-                                missBlockAddr =
-                                    requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
-
+                                missBlockAddr = requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
                                 stallLogged = false;
-
                                 wtNeeded = false;
-
-                                noAllocStore =
-                                    (requestType == STORE) &&
+                                noAllocStore = (requestType == STORE) &&
                                     (writePolicy == WT_NO_WRITE_ALLOCATE);
 
                                 log << endl
-                                    << "Cache MISS type="
-                                    << (int)requestType
-                                    << " addr="
-                                    << requestAddr
-                                    << " wbPending="
-                                    << wbPending
-                                    << " cycle="
-                                    << current_time.cycle();
+                                    << "[C" << coreId << "] Cache MISS type="
+                                    << (int)requestType << " addr=" << requestAddr
+                                    << " wbPending=" << wbPending
+                                    << " cycle=" << current_time.cycle();
                             $;
 
-
                             if(noAllocStore) then
-
-                                // WRITE-THROUGH / NO-WRITE-ALLOCATE store
-                                // miss: do not evict, do not fetch. Send the
-                                // store straight to memory through the write
-                                // buffer and leave the cache untouched.
                                 $
                                     set_store_data();
-
                                     wtStoreAddr = requestAddr;
                                     wtStoreSize = requestSize;
                                     wtNeeded = true;
-
-                                    log << endl
-                                        << "WRITE-THROUGH NO-ALLOC addr="
-                                        << requestAddr
-                                        << " size="
-                                        << (int)requestSize
-                                        << " cycle="
-                                        << current_time.cycle();
                                 $;
 
-
-                                // Park the store: wait for the buffer to be
-                                // free (also serializes stores to memory).
                                 do
-
-                                    $
-                                        bufBusy = wbPending;
-
-                                        if(bufBusy) {
-                                            statBufferStall++;
-                                        }
-                                    $;
-
-                                    if(bufBusy) then
-                                        wait
-                                    end if;
-
+                                    $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                    if(bufBusy) then wait end if;
                                 while(bufBusy) end do;
-
 
                                 $
                                     statWriteThroughs++;
-
                                     wbBlockAddr = wtStoreAddr;
                                     wbSize = wtStoreSize;
                                     wbData0 = responseData0;
                                     wbData1 = responseData1;
                                     wbData2 = responseData2;
                                     wbData3 = responseData3;
-
                                     wbPending = true;
-
-                                    log << endl
-                                        << "WRITE-THROUGH PARKED addr="
-                                        << wtStoreAddr
-                                        << " size="
-                                        << (int)wtStoreSize
-                                        << " cycle="
-                                        << current_time.cycle();
                                 $;
 
-
                                 if(nonBlocking == 0) then
-
                                     do
-
-                                        $
-                                            bufBusy = wbPending;
-                                        $;
-
-                                        if(bufBusy) then
-                                            wait
-                                        end if;
-
+                                        $ bufBusy = wbPending; $;
+                                        if(bufBusy) then wait end if;
                                     while(bufBusy) end do;
-
                                 end if;
 
                             else
 
-                            // (A) Stall while the very block we need is still
-                            //     in the write buffer (victim write-back or
-                            //     write-through store): fetching it now would
-                            //     return stale data from memory.
-                            do
-
-                                $
-                                    conflict =
-                                        wbPending &&
-                                        ((wbBlockAddr & ~((uint32_t)BLOCK_SIZE - 1))
-                                         == missBlockAddr);
-
-                                    if(conflict) {
-
-                                        statConflictStall++;
-
-                                        if(!stallLogged) {
-
-                                            stallLogged = true;
-
-                                            log << endl
-                                                << "STALL miss on block under write-back block="
-                                                << missBlockAddr
-                                                << " cycle="
-                                                << current_time.cycle();
-
-                                        }
-                                    }
-                                $;
-
-                                if(conflict) then
-                                    wait
-                                end if;
-
-                            while(conflict) end do;
-
-
-                            // (B) Choose the victim
-                            $
-                                wb_setIdx = get_set_index(requestAddr);
-                                wb_victimWay = select_victim_way(wb_setIdx);
-
-                                wb_needWriteback =
-                                    cache[wb_setIdx][wb_victimWay].isDirty();
-
-                                wb_victimAddr = 0;
-
-                                if(wb_needWriteback) {
-                                    wb_victimAddr =
-                                        get_block_addr_from_tag_set(
-                                            cache[wb_setIdx][wb_victimWay].tagBit,
-                                            wb_setIdx
-                                        );
-                                }
-                            $;
-
-
-                            // (C) Dirty victim: park it in the write-back buffer
-                            if(wb_needWriteback) then
-
-                                // Only one write-back at a time: wait for the
-                                // buffer to be free.
+                                // Stall on write-buffer conflict
                                 do
-
                                     $
-                                        bufBusy = wbPending;
-
-                                        if(bufBusy) {
-                                            statBufferStall++;
+                                        conflict = wbPending &&
+                                            ((wbBlockAddr & ~((uint32_t)BLOCK_SIZE - 1)) == missBlockAddr);
+                                        if(conflict) {
+                                            statConflictStall++;
+                                            if(!stallLogged) { stallLogged = true; }
                                         }
                                     $;
+                                    if(conflict) then wait end if;
+                                while(conflict) end do;
 
-                                    if(bufBusy) then
-                                        wait
-                                    end if;
-
-                                while(bufBusy) end do;
-
-
+                                // Choose victim
                                 $
-                                    statWritebacks++;
-
-                                    read_block_for_writeback(
-                                        wb_setIdx,
-                                        wb_victimWay
-                                    );
-
-                                    wbData0 = responseData0;
-                                    wbData1 = responseData1;
-                                    wbData2 = responseData2;
-                                    wbData3 = responseData3;
-
-                                    wbBlockAddr = wb_victimAddr;
-                                    wbSize = block_size_code();
-                                    wbPending = true;
-
-                                    // The line is free for reuse right now.
-                                    cache[wb_setIdx][wb_victimWay].state = INVALID;
-
-                                    log << endl
-                                        << "WRITE-BACK PARKED victim="
-                                        << wb_victimAddr
-                                        << " cycle="
-                                        << current_time.cycle();
+                                    wb_setIdx = get_set_index(requestAddr);
+                                    wb_victimWay = select_victim_way(wb_setIdx);
+                                    wb_needWriteback = cache[wb_setIdx][wb_victimWay].isDirty();
+                                    wb_victimAddr = 0;
+                                    if(wb_needWriteback) {
+                                        wb_victimAddr = get_block_addr_from_tag_set(
+                                            cache[wb_setIdx][wb_victimWay].tagBit, wb_setIdx);
+                                    }
                                 $;
 
-
-                                // Blocking mode (Q9 behaviour): do not go on
-                                // until the write-back has finished.
-                                if(nonBlocking == 0) then
-
+                                // Park dirty victim
+                                if(wb_needWriteback) then
                                     do
-
-                                        $
-                                            bufBusy = wbPending;
-                                        $;
-
-                                        if(bufBusy) then
-                                            wait
-                                        end if;
-
+                                        $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                        if(bufBusy) then wait end if;
                                     while(bufBusy) end do;
 
+                                    $
+                                        statWritebacks++;
+                                        read_block_for_writeback(wb_setIdx, wb_victimWay);
+                                        wbData0 = responseData0;
+                                        wbData1 = responseData1;
+                                        wbData2 = responseData2;
+                                        wbData3 = responseData3;
+                                        wbBlockAddr = wb_victimAddr;
+                                        wbSize = block_size_code();
+                                        wbPending = true;
+                                        cache[wb_setIdx][wb_victimWay].state = INVALID;
+                                    $;
+
+                                    if(nonBlocking == 0) then
+                                        do
+                                            $ bufBusy = wbPending; $;
+                                            if(bufBusy) then wait end if;
+                                        while(bufBusy) end do;
+                                    end if;
                                 end if;
 
-                            end if;
+                                // Fetch from memory (ICache) or via bus (DCache)
+                                if(isDcache == 0) then
 
+                                    // ICache path: direct memory access
+                                    $
+                                        feWaiting = true;
+                                    $;
 
-                            // (D) Acquire the memory port. Setting feWaiting
-                            //     keeps the engine from starting a new
-                            //     write-back first (reads have priority).
-                            $
-                                feWaiting = true;
-                            $;
+                                    do
+                                        $
+                                            if(!memBusy) { memBusy = true; feWaiting = false; gotMem = true; }
+                                            else { gotMem = false; statMemWait++; }
+                                        $;
+                                        if(not gotMem) then wait end if;
+                                    while(not gotMem) end do;
 
-                            do
+                                    $
+                                        uint32_t blockAddr = requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
+                                        uint8_t blockSize;
+                                        if(BLOCK_SIZE == 4) blockSize = WORD;
+                                        else if(BLOCK_SIZE == 8) blockSize = DOUBLEWORD;
+                                        else blockSize = QUADWORD;
+                                        prepareMemoryRequest(blockAddr, LOAD, blockSize, 0, 0, 0, 0);
+                                    $;
 
-                                $
-                                    if(!memBusy) {
-                                        memBusy = true;
-                                        feWaiting = false;
-                                        gotMem = true;
-                                    }
-                                    else {
-                                        gotMem = false;
-                                        statMemWait++;
-                                    }
-                                $;
+                                    do
+                                        wait until(this_phase == 1);
+                                        $ ok = m_outp->push(requestToMemory); $;
+                                        if(not ok) then wait end if;
+                                    while(not ok) end do;
 
-                                if(not gotMem) then
-                                    wait
-                                end if;
+                                    do
+                                        wait until(this_phase == 0);
+                                        $ hasToken = m_inp->peek(responseFromMemory); $;
+                                        if(not hasToken) then wait end if;
+                                    while(not hasToken) end do;
 
-                            while(not gotMem) end do;
+                                    $
+                                        pulled = m_inp->pull(responseFromMemory);
+                                        sitar::unpack(responseFromMemory, responseErr,
+                                            responseData0, responseData1, responseData2, responseData3);
+                                        memBusy = false;
+                                    $;
 
-
-                            // (E) Fetch the requested block
-                            $
-                                uint32_t blockAddr =
-                                    requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
-
-                                uint8_t blockSize;
-
-                                if(BLOCK_SIZE == 4)
-                                    blockSize = WORD;
-                                else if(BLOCK_SIZE == 8)
-                                    blockSize = DOUBLEWORD;
                                 else
-                                    blockSize = QUADWORD;
 
-                                prepareMemoryRequest(
-                                    blockAddr,
-                                    LOAD,
-                                    blockSize,
-                                    0, 0, 0, 0
-                                );
-
-                                log << endl
-                                    << "FETCH block="
-                                    << blockAddr
-                                    << " cycle="
-                                    << current_time.cycle();
-                            $;
-
-
-                            do
-
-                                wait until(this_phase == 1);
-
-                                $
-                                    ok = m_outp->push(requestToMemory);
-                                $;
-
-                                if(not ok) then
-                                    wait
-                                end if;
-
-                            while(not ok) end do;
-
-
-                            do
-
-                                wait until(this_phase == 0);
-
-                                $
-                                    hasToken =
-                                        m_inp->peek(responseFromMemory);
-                                $;
-
-                                if(not hasToken) then
-                                    wait
-                                end if;
-
-                            while(not hasToken) end do;
-
-                            $
-                                pulled =
-                                    m_inp->pull(responseFromMemory);
-
-                                sitar::unpack(
-                                    responseFromMemory,
-                                    responseErr,
-                                    responseData0,
-                                    responseData1,
-                                    responseData2,
-                                    responseData3
-                                );
-
-                                // Release the port: the engine may now drain
-                                // the write-back buffer in the background.
-                                memBusy = false;
-                            $;
-
-
-                            // (F) Install the block and complete the access
-                            $
-                                if(responseErr == 0) {
-
-                                    write_cache(
-                                        requestAddr,
-                                        wb_victimWay,
-                                        current_time.cycle()
-                                    );
-
-                                    if(requestType == STORE) {
-
-                                        set_store_data();
-
-                                        // State is set to MODIFIED only in WB mode
-                                        write_data_to_cache(
-                                            requestAddr,
-                                            requestSize
-                                        );
-
-                                        if(writePolicy == WT_WRITE_ALLOCATE) {
-
-                                            wtNeeded = true;
-                                            wtStoreAddr = requestAddr;
-                                            wtStoreSize = requestSize;
-
+                                    // DCache path: bus-based access
+                                    $
+                                        if(requestType == STORE) {
+                                            bus_req_cmd = BUS_RDX;
+                                            statBusRdx++;
                                         }
+                                        else {
+                                            bus_req_cmd = BUS_RD;
+                                            statBusRd++;
+                                        }
+                                        bus_req_addr = requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
+                                        bus_req_size = block_size_code();
+                                        bus_req_valid = true;
 
                                         log << endl
-                                            << "STORE to new block state="
-                                            << (writePolicy == WB_WRITE_ALLOCATE ? "M" : "S");
-
-                                    }
-                                    else {
-
-                                        // Reload for the response; do not
-                                        // touch metadata twice for one access.
-                                        read_cache(
-                                            requestAddr,
-                                            requestSize,
-                                            0,
-                                            current_time.cycle()
-                                        );
-
-                                    }
-                                }
-                            $;
-
-
-                            // WRITE-THROUGH store on MISS (allocate): park
-                            // the merged store in the unified write buffer.
-                            if(wtNeeded) then
-
-                                do
-
-                                    $
-                                        bufBusy = wbPending;
-
-                                        if(bufBusy) {
-                                            statBufferStall++;
-                                        }
+                                            << "[C" << coreId << "] BUS_REQ cmd="
+                                            << (int)bus_req_cmd << " addr=" << bus_req_addr;
                                     $;
 
-                                    if(bufBusy) then
-                                        wait
-                                    end if;
-
-                                while(bufBusy) end do;
-
-
-                                $
-                                    statWriteThroughs++;
-
-                                    wbBlockAddr = wtStoreAddr;
-                                    wbSize = wtStoreSize;
-                                    wbData0 = responseData0;
-                                    wbData1 = responseData1;
-                                    wbData2 = responseData2;
-                                    wbData3 = responseData3;
-
-                                    wbPending = true;
-
-                                    log << endl
-                                        << "WRITE-THROUGH PARKED addr="
-                                        << wtStoreAddr
-                                        << " size="
-                                        << (int)wtStoreSize
-                                        << " cycle="
-                                        << current_time.cycle();
-                                $;
-
-
-                                if(nonBlocking == 0) then
-
                                     do
-
                                         $
-                                            bufBusy = wbPending;
+                                            busDone = bus_resp_valid;
+                                            if(!busDone) statBusWaitCycles++;
                                         $;
+                                        if(not busDone) then wait end if;
+                                    while(not busDone) end do;
 
-                                        if(bufBusy) then
-                                            wait
-                                        end if;
-
-                                    while(bufBusy) end do;
+                                    $
+                                        bus_resp_valid = false;
+                                        bus_req_valid = false;
+                                        responseErr = bus_resp_err;
+                                        responseData0 = bus_resp_d0;
+                                        responseData1 = bus_resp_d1;
+                                        responseData2 = bus_resp_d2;
+                                        responseData3 = bus_resp_d3;
+                                    $;
 
                                 end if;
 
-                            end if;
+                                // Install block
+                                $
+                                    if(responseErr == 0) {
+                                        write_cache(requestAddr, wb_victimWay, current_time.cycle());
 
-                            end if;     // closes: if(noAllocStore)
+                                        if(requestType == STORE) {
+                                            set_store_data();
+                                            write_data_to_cache(requestAddr, requestSize);
 
-                        end if;     // closes: cacheStatus == HIT
+                                            if(isDcache) {
+                                                cache[wb_setIdx][wb_victimWay].state = MODIFIED;
+                                            }
+                                            else if(writePolicy == WT_WRITE_ALLOCATE) {
+                                                wtNeeded = true;
+                                                wtStoreAddr = requestAddr;
+                                                wtStoreSize = requestSize;
+                                            }
+                                        }
+                                        else {
+                                            int dummyHitState;
+                                            read_cache(requestAddr, requestSize, 0,
+                                                current_time.cycle(), dummyHitState);
+                                        }
+                                    }
+                                $;
 
-                    end if;         // closes: ATOMICLOADSTORE
+                                // WT on miss
+                                if(wtNeeded) then
+                                    do
+                                        $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                        if(bufBusy) then wait end if;
+                                    while(bufBusy) end do;
 
-                end if;             // closes: alignment check
+                                    $
+                                        statWriteThroughs++;
+                                        wbBlockAddr = wtStoreAddr;
+                                        wbSize = wtStoreSize;
+                                        wbData0 = responseData0;
+                                        wbData1 = responseData1;
+                                        wbData2 = responseData2;
+                                        wbData3 = responseData3;
+                                        wbPending = true;
+                                    $;
 
-            end if;                 // closes: isStatRequest
+                                    if(nonBlocking == 0) then
+                                        do
+                                            $ bufBusy = wbPending; $;
+                                            if(bufBusy) then wait end if;
+                                        while(bufBusy) end do;
+                                    end if;
+                        end if;
 
+                    end if;
+
+
+                end if;
+
+            end if;
+
+            end if;
+
+            end if;
 
             // Cache access delay
             wait(CACHE_DELAY, 0);
 
-
-            // Send response to processor
+            // Send response
             $
                 resp_err = responseErr;
-
                 resp_data0 = responseData0;
                 resp_data1 = responseData1;
                 resp_data2 = responseData2;
                 resp_data3 = responseData3;
-
                 resp_valid = true;
             $;
 
-
-            // Wait for processor to consume response
             do
-
-                $
-                    hasToken = resp_valid;
-                $;
-
-                if(hasToken) then
-                    wait
-                end if;
-
+                $ hasToken = resp_valid; $;
+                if(hasToken) then wait end if;
             while(hasToken) end do;
 
         while(1) end do;
@@ -2140,36 +2033,22 @@ end procedure
 
 
 // =====================================================================
-// Write engine: drains the write buffer of one Cache to memory in the
-// background. The parked write is either a full dirty victim block
-// (write-back) or a write-through store of any aligned size; the byte
-// size is carried in *wb_size. It only touches the buffer and the
-// memory port; it never reads or writes cache lines, so it cannot race
-// with the front end.
+// Write engine: drains the write buffer to memory
 // =====================================================================
 procedure WbEngine
 
     parameter int BLOCK_SIZE = 16
+    parameter int USE_BUS = 0
 
     include $#include <cstdlib>$
     include $#include <cstdint>$
 
     decl $
 
-        enum MemOpType {
-            IFETCH = 0,
-            LOAD = 1,
-            STORE = 2,
-            ATOMICLOADSTORE = 3
-        };
+        enum MemOpType { IFETCH = 0, LOAD = 1, STORE = 2, ATOMICLOADSTORE = 3 };
+        enum MemSize { WORD = 0, DOUBLEWORD = 1, QUADWORD = 2 };
+        enum BusCmd { BUS_NONE = 0, BUS_RD = 1, BUS_RDX = 2, BUS_UPGR = 3, BUS_WB = 4, BUS_ATOMIC = 5 };
 
-        enum MemSize {
-            WORD = 0,
-            DOUBLEWORD = 1,
-            QUADWORD = 2
-        };
-
-        // Wired to the cache by Core
         bool *wb_pending;
         bool *mem_busy;
         bool *fe_waiting;
@@ -2180,6 +2059,17 @@ procedure WbEngine
         uint32_t *wb_d2;
         uint32_t *wb_d3;
         long *wb_done_cnt;
+
+        // Bus channels (used when USE_BUS=1)
+        bool *wb_bus_req_valid;
+        bool *wb_bus_resp_valid;
+        uint32_t *wb_bus_addr;
+        uint8_t *wb_bus_size;
+        uint32_t *wb_bus_d0;
+        uint32_t *wb_bus_d1;
+        uint32_t *wb_bus_d2;
+        uint32_t *wb_bus_d3;
+        uint8_t *wb_bus_err;
 
         token<22> requestToMemory;
         token<17> responseFromMemory;
@@ -2194,146 +2084,131 @@ procedure WbEngine
         bool ok;
         bool hasToken;
         bool pulled;
-
+        bool useBus;
+        bool busDone;
+        uint32_t activeWbAddr;
 
         void prepareWriteback() {
-
             uint32_t addr = *wb_block_addr;
             uint8_t type = STORE;
-
-            // Size comes from the buffer: a full block for a write-back
-            // victim, or the store size for a write-through store.
             uint8_t size = *wb_size;
-
             uint32_t d0 = *wb_d0;
             uint32_t d1 = *wb_d1;
             uint32_t d2 = *wb_d2;
             uint32_t d3 = *wb_d3;
-
-            sitar::pack(
-                requestToMemory,
-                addr,
-                type,
-                size,
-                d0,
-                d1,
-                d2,
-                d3
-            );
-
+            sitar::pack(requestToMemory, addr, type, size, d0, d1, d2, d3);
         }
-
 
         inport<17>* m_inp;
         outport<22>* m_outp;
     $
 
     init $
+        useBus = USE_BUS;
     $
-
 
     behavior
 
         do
 
-            // Wait until there is something to write back AND the memory
-            // port is free AND the cache front end is not asking for it.
-            // The test and the claim are one code block, so they are atomic.
-            do
+            if(useBus == 0) then
+
+                // Direct memory access path - need to check mem_busy
+                do
+                    $
+                        hasWork = (*wb_pending) && (!(*fe_waiting)) && (!(*mem_busy));
+                        if(hasWork) *mem_busy = true;
+                    $;
+                    if(not hasWork) then wait end if;
+                while(not hasWork) end do;
+
+                // Direct memory access path
+                $
+                    prepareWriteback();
+                    log << endl << "MEM WRITE START addr=" << *wb_block_addr
+                        << " size=" << (int)*wb_size << " cycle=" << current_time.cycle();
+                $;
+
+                do
+                    wait until(this_phase == 1);
+                    $ ok = m_outp->push(requestToMemory); $;
+                    if(not ok) then wait end if;
+                while(not ok) end do;
+
+                do
+                    wait until(this_phase == 0);
+                    $ hasToken = m_inp->peek(responseFromMemory); $;
+                    if(not hasToken) then wait end if;
+                while(not hasToken) end do;
 
                 $
-                    hasWork =
-                        (*wb_pending) &&
-                        (!(*fe_waiting)) &&
-                        (!(*mem_busy));
+                    pulled = m_inp->pull(responseFromMemory);
+                    sitar::unpack(responseFromMemory, responseErr,
+                        responseData0, responseData1, responseData2, responseData3);
+                    if(responseErr != 0) log << endl << "MEM WRITE ERROR=" << (int)responseErr;
+                    log << endl << "MEM WRITE DONE addr=" << *wb_block_addr
+                        << " cycle=" << current_time.cycle();
+                    (*wb_done_cnt)++;
+                    *wb_pending = false;
+                    *mem_busy = false;
+                $;
 
-                    if(hasWork) {
-                        *mem_busy = true;
+            else
+
+                // Bus-based write-back path - no need to check mem_busy
+                do
+                    $
+                        hasWork = *wb_pending;
+                    $;
+                    if(not hasWork) then wait end if;
+                while(not hasWork) end do;
+
+                // Bus-based write-back path
+                $
+                    activeWbAddr = *wb_block_addr;
+                    *wb_bus_resp_valid = false;
+                    *wb_bus_err = 0;
+                    *wb_bus_req_valid = true;
+                    *wb_bus_addr = activeWbAddr;
+                    *wb_bus_size = *wb_size;
+                    *wb_bus_d0 = *wb_d0;
+                    *wb_bus_d1 = *wb_d1;
+                    *wb_bus_d2 = *wb_d2;
+                    *wb_bus_d3 = *wb_d3;
+
+                    log << endl << "BUS WB START addr=" << activeWbAddr
+                        << " size=" << (int)*wb_size << " cycle=" << current_time.cycle();
+                $;
+
+                do
+                    $
+                        busDone = *wb_bus_resp_valid;
+                    $;
+                    if(not busDone) then wait end if;
+                while(not busDone) end do;
+
+                $
+                    *wb_bus_resp_valid = false;
+                    *wb_bus_req_valid = false;
+
+                    if(*wb_bus_err == 3) {
+                        log << endl << "BUS WB CANCELLED BY SNOOP addr="
+                            << activeWbAddr << " cycle=" << current_time.cycle();
                     }
+                    else if(*wb_bus_err != 0) {
+                        log << endl << "BUS WB ERROR=" << (int)*wb_bus_err
+                            << " addr=" << activeWbAddr
+                            << " cycle=" << current_time.cycle();
+                    }
+                    else {
+                        log << endl << "BUS WB DONE addr=" << activeWbAddr
+                            << " cycle=" << current_time.cycle();
+                    }
+                    (*wb_done_cnt)++;
+                    *wb_pending = false;
                 $;
 
-                if(not hasWork) then
-                    wait
-                end if;
-
-            while(not hasWork) end do;
-
-
-            $
-                prepareWriteback();
-
-                log << endl
-                    << "MEM WRITE START addr="
-                    << *wb_block_addr
-                    << " size="
-                    << (int)*wb_size
-                    << " cycle="
-                    << current_time.cycle();
-            $;
-
-
-            do
-
-                wait until(this_phase == 1);
-
-                $
-                    ok = m_outp->push(requestToMemory);
-                $;
-
-                if(not ok) then
-                    wait
-                end if;
-
-            while(not ok) end do;
-
-
-            do
-
-                wait until(this_phase == 0);
-
-                $
-                    hasToken =
-                        m_inp->peek(responseFromMemory);
-                $;
-
-                if(not hasToken) then
-                    wait
-                end if;
-
-            while(not hasToken) end do;
-
-
-            $
-                pulled =
-                    m_inp->pull(responseFromMemory);
-
-                sitar::unpack(
-                    responseFromMemory,
-                    responseErr,
-                    responseData0,
-                    responseData1,
-                    responseData2,
-                    responseData3
-                );
-
-                if(responseErr != 0) {
-
-                    log << endl
-                        << "MEM WRITE ERROR="
-                        << (int)responseErr;
-
-                }
-
-                log << endl
-                    << "MEM WRITE DONE addr="
-                    << *wb_block_addr
-                    << " cycle="
-                    << current_time.cycle();
-
-                (*wb_done_cnt)++;
-                *wb_pending = false;
-                *mem_busy = false;
-            $;
+            end if;
 
         while(1) end do;
 
@@ -2343,120 +2218,807 @@ end procedure
 
 
 
-// Core module: Processor + ICACHE + DCACHE (+ one write engine each)
-module Core
+// =====================================================================
+// CoherenceBus: arbitrates between two data caches and shared memory,
+// implements MSI snooping protocol.
+// =====================================================================
+procedure CoherenceBus
 
-    // P_LOAD=40, P_STORE=30, EXECUTION_DELAY=3,
-    // TOTAL_INSTRUCTIONS=1000, MAX_TIME=100000, BLOCK_SIZE=16
-    procedure proc : Processor<40, 30, 3, 1000, 100000, 16>
+    parameter int BLOCK_SIZE = 16
+    parameter int BUS_SNOOP_DELAY = 2
+    parameter int NUM_SETS = 2
+    parameter int NUM_WAYS = 8
+    parameter int CACHE_DELAY = 4
+    parameter int REPL_POLICY = 1
+    parameter int WRITE_POLICY = 0
 
-    // ICACHE: 4 sets x 4 ways x 16 bytes = 256 bytes total
-    procedure icache : Cache<4, 4, 16>
+    include $#include <cstdlib>$
+    include $#include <cstdint>$
+    include $#include "Cache.h"$
 
-    // DCACHE: 2 sets, 8 ways = 16 blocks total (256 bytes)
-    procedure dcache : Cache<2, 8, 16>
+    decl $
 
-    procedure icache_wb : WbEngine<16>
-    procedure dcache_wb : WbEngine<16>
+        enum MemOpType { IFETCH = 0, LOAD = 1, STORE = 2, ATOMICLOADSTORE = 3 };
+        enum MemSize { WORD = 0, DOUBLEWORD = 1, QUADWORD = 2 };
+
+        enum BusCmd {
+            BUS_NONE = 0, BUS_RD = 1, BUS_RDX = 2,
+            BUS_UPGR = 3, BUS_WB = 4, BUS_ATOMIC = 5
+        };
+
+        // Use typed pointers to the specific Cache instantiation
+        Cache<NUM_SETS, NUM_WAYS, BLOCK_SIZE, CACHE_DELAY, REPL_POLICY, WRITE_POLICY, 0, 1> *dcache0;
+        Cache<NUM_SETS, NUM_WAYS, BLOCK_SIZE, CACHE_DELAY, REPL_POLICY, WRITE_POLICY, 1, 1> *dcache1;
+
+        // Bus request/response channels for each cache (front-end)
+        bool *bus0_req_valid;
+        bool *bus0_resp_valid;
+        uint8_t *bus0_req_cmd;
+        uint32_t *bus0_req_addr;
+        uint8_t *bus0_req_size;
+        uint8_t *bus0_resp_err;
+        uint32_t *bus0_resp_d0;
+        uint32_t *bus0_resp_d1;
+        uint32_t *bus0_resp_d2;
+        uint32_t *bus0_resp_d3;
+
+        bool *bus1_req_valid;
+        bool *bus1_resp_valid;
+        uint8_t *bus1_req_cmd;
+        uint32_t *bus1_req_addr;
+        uint8_t *bus1_req_size;
+        uint8_t *bus1_resp_err;
+        uint32_t *bus1_resp_d0;
+        uint32_t *bus1_resp_d1;
+        uint32_t *bus1_resp_d2;
+        uint32_t *bus1_resp_d3;
+
+        // WbEngine bus channels (for write-backs)
+        bool *wb0_bus_req_valid;
+        bool *wb0_bus_resp_valid;
+        uint32_t *wb0_bus_addr;
+        uint8_t *wb0_bus_size;
+        uint32_t *wb0_bus_d0;
+        uint32_t *wb0_bus_d1;
+        uint32_t *wb0_bus_d2;
+        uint32_t *wb0_bus_d3;
+        uint8_t *wb0_bus_err;
+
+        bool *wb1_bus_req_valid;
+        bool *wb1_bus_resp_valid;
+        uint32_t *wb1_bus_addr;
+        uint8_t *wb1_bus_size;
+        uint32_t *wb1_bus_d0;
+        uint32_t *wb1_bus_d1;
+        uint32_t *wb1_bus_d2;
+        uint32_t *wb1_bus_d3;
+        uint8_t *wb1_bus_err;
+
+        // Memory port
+        token<22> requestToMemory;
+        token<17> responseFromMemory;
+
+        inport<17>* m_inp;
+        outport<22>* m_outp;
+
+        // Arbitration
+        int rrTurn;
+        bool anyRequest;
+        int grantedId;
+        uint8_t grantedCmd;
+        uint32_t grantedAddr;
+        uint8_t grantedSize;
+        bool isWbRequest;
+        int wbId;
+        uint32_t wbReqAddr;
+        uint8_t wbReqSize;
+        uint32_t wbReqD0;
+        uint32_t wbReqD1;
+        uint32_t wbReqD2;
+        uint32_t wbReqD3;
+
+        // Snoop results
+        bool suppliedDirty;
+        uint32_t snoopD0;
+        uint32_t snoopD1;
+        uint32_t snoopD2;
+        uint32_t snoopD3;
+        bool snoopHit;
+
+        // Memory transaction
+        bool ok;
+        bool hasToken;
+        bool pulled;
+        uint8_t responseErr;
+        uint32_t responseData0;
+        uint32_t responseData1;
+        uint32_t responseData2;
+        uint32_t responseData3;
+
+        // Stats
+        long statTotalTransactions;
+        long statUpgrTransactions;
+        long statRdTransactions;
+        long statRdxTransactions;
+
+        void prepareMemLoad(uint32_t blockAddr) {
+            uint8_t blockSize;
+            if(BLOCK_SIZE == 4) blockSize = WORD;
+            else if(BLOCK_SIZE == 8) blockSize = DOUBLEWORD;
+            else blockSize = QUADWORD;
+            sitar::pack(requestToMemory, blockAddr, (uint8_t)LOAD, blockSize,
+                (uint32_t)0, (uint32_t)0, (uint32_t)0, (uint32_t)0);
+        }
+
+        void prepareMemStore(uint32_t addr, uint8_t size,
+            uint32_t d0, uint32_t d1, uint32_t d2, uint32_t d3) {
+            sitar::pack(requestToMemory, addr, (uint8_t)STORE, size, d0, d1, d2, d3);
+        }
+
+    $
+
+    init $
+        rrTurn = 0;
+        statTotalTransactions = 0;
+        statUpgrTransactions = 0;
+        statRdTransactions = 0;
+        statRdxTransactions = 0;
+    $
+
+    behavior
+
+        do
+
+            // Wait for any bus request (from caches or WbEngines)
+            do
+                $
+                    anyRequest =
+                        ((*bus0_req_valid) && (!(*bus0_resp_valid))) ||
+                        ((*bus1_req_valid) && (!(*bus1_resp_valid))) ||
+                        ((*wb0_bus_req_valid) && (!(*wb0_bus_resp_valid))) ||
+                        ((*wb1_bus_req_valid) && (!(*wb1_bus_resp_valid)));
+                $;
+                if(not anyRequest) then wait end if;
+            while(not anyRequest) end do;
+
+            // Round-robin arbitration (front-end demand before background write-backs)
+            $
+                grantedId = -1;
+                isWbRequest = false;
+                wbId = -1;
+
+                // Priority 1: Front-end demand requests (round-robin)
+                if(rrTurn == 0) {
+                    if(*bus0_req_valid && !(*bus0_resp_valid)) { grantedId = 0; }
+                    else if(*bus1_req_valid && !(*bus1_resp_valid)) { grantedId = 1; }
+                }
+                else {
+                    if(*bus1_req_valid && !(*bus1_resp_valid)) { grantedId = 1; }
+                    else if(*bus0_req_valid && !(*bus0_resp_valid)) { grantedId = 0; }
+                }
+
+                // Priority 2: WbEngine write-back requests (if no front-end request)
+                if(grantedId < 0) {
+                    isWbRequest = true;
+                    if(rrTurn == 0) {
+                        if(*wb0_bus_req_valid && !(*wb0_bus_resp_valid)) { wbId = 0; }
+                        else if(*wb1_bus_req_valid && !(*wb1_bus_resp_valid)) { wbId = 1; }
+                    }
+                    else {
+                        if(*wb1_bus_req_valid && !(*wb1_bus_resp_valid)) { wbId = 1; }
+                        else if(*wb0_bus_req_valid && !(*wb0_bus_resp_valid)) { wbId = 0; }
+                    }
+                }
+
+                if(!isWbRequest) {
+                    if(grantedId == 0) {
+                        grantedCmd = *bus0_req_cmd;
+                        grantedAddr = *bus0_req_addr;
+                        grantedSize = *bus0_req_size;
+                    }
+                    else {
+                        grantedCmd = *bus1_req_cmd;
+                        grantedAddr = *bus1_req_addr;
+                        grantedSize = *bus1_req_size;
+                    }
+                }
+                else {
+                    grantedCmd = BUS_WB;
+                    if(wbId == 0) {
+                        grantedAddr = *wb0_bus_addr;
+                        grantedSize = *wb0_bus_size;
+                    }
+                    else {
+                        grantedAddr = *wb1_bus_addr;
+                        grantedSize = *wb1_bus_size;
+                    }
+                }
+
+                suppliedDirty = false;
+                snoopHit = false;
+                snoopD0 = 0; snoopD1 = 0; snoopD2 = 0; snoopD3 = 0;
+
+                // Snoop the peer cache (for non-WB requests)
+                // dcache0 and dcache1 are different template types (different CORE_ID),
+                // so we must call handle_snoop on each explicitly.
+                if(!isWbRequest && grantedCmd != BUS_WB) {
+                    if(grantedId == 0) {
+                        snoopHit = dcache1->handle_snoop(
+                            grantedCmd, grantedAddr,
+                            suppliedDirty, snoopD0, snoopD1, snoopD2, snoopD3);
+                    }
+                    else {
+                        snoopHit = dcache0->handle_snoop(
+                            grantedCmd, grantedAddr,
+                            suppliedDirty, snoopD0, snoopD1, snoopD2, snoopD3);
+                    }
+                }
+
+                statTotalTransactions++;
+
+                log << endl
+                    << "BUS GRANT "
+                    << (isWbRequest ? "wb=" : "core=")
+                    << (isWbRequest ? wbId : grantedId)
+                    << " cmd=" << (int)grantedCmd
+                    << " addr=" << grantedAddr
+                    << " snoopHit=" << snoopHit
+                    << " dirtyIntervention=" << suppliedDirty
+                    << " cycle=" << current_time.cycle();
+            $;
+
+            // Execute a write-engine request separately from cache demand
+            // requests. The bus owns the shared memory port and returns one
+            // acknowledgement, preventing the WbEngine from reissuing it.
+            if(isWbRequest) then
+
+                $
+                    if(wbId == 0) {
+                        wbReqAddr = *wb0_bus_addr;
+                        wbReqSize = *wb0_bus_size;
+                        wbReqD0 = *wb0_bus_d0;
+                        wbReqD1 = *wb0_bus_d1;
+                        wbReqD2 = *wb0_bus_d2;
+                        wbReqD3 = *wb0_bus_d3;
+                    }
+                    else {
+                        wbReqAddr = *wb1_bus_addr;
+                        wbReqSize = *wb1_bus_size;
+                        wbReqD0 = *wb1_bus_d0;
+                        wbReqD1 = *wb1_bus_d1;
+                        wbReqD2 = *wb1_bus_d2;
+                        wbReqD3 = *wb1_bus_d3;
+                    }
+
+                    prepareMemStore(wbReqAddr, wbReqSize,
+                        wbReqD0, wbReqD1, wbReqD2, wbReqD3);
+                    log << endl << "BUS WB EXEC wb=" << wbId
+                        << " addr=" << wbReqAddr
+                        << " size=" << (int)wbReqSize
+                        << " cycle=" << current_time.cycle();
+                $;
+
+                do
+                    wait until(this_phase == 1);
+                    $ ok = m_outp->push(requestToMemory); $;
+                    if(not ok) then wait end if;
+                while(not ok) end do;
+
+                do
+                    wait until(this_phase == 0);
+                    $ hasToken = m_inp->peek(responseFromMemory); $;
+                    if(not hasToken) then wait end if;
+                while(not hasToken) end do;
+
+                $
+                    pulled = m_inp->pull(responseFromMemory);
+                    sitar::unpack(responseFromMemory, responseErr,
+                        responseData0, responseData1, responseData2, responseData3);
+
+                    if(wbId == 0) {
+                        *wb0_bus_err = responseErr;
+                        *wb0_bus_resp_valid = true;
+                    }
+                    else {
+                        *wb1_bus_err = responseErr;
+                        *wb1_bus_resp_valid = true;
+                    }
+
+                    log << endl << "BUS WB DONE wb=" << wbId
+                        << " addr=" << wbReqAddr
+                        << " cycle=" << current_time.cycle();
+                $;
+
+            else
+
+            // Execute front-end coherence transaction based on command
+            if(grantedCmd == BUS_UPGR) then
+
+                // BUS_UPGR: snoop-only, no memory access needed
+                $
+                    statUpgrTransactions++;
+                $;
+
+                wait(BUS_SNOOP_DELAY, 0);
+
+                $
+                    if(grantedId == 0) {
+                        *bus0_resp_err = 0;
+                        *bus0_resp_d0 = 0; *bus0_resp_d1 = 0;
+                        *bus0_resp_d2 = 0; *bus0_resp_d3 = 0;
+                        *bus0_resp_valid = true;
+                    }
+                    else {
+                        *bus1_resp_err = 0;
+                        *bus1_resp_d0 = 0; *bus1_resp_d1 = 0;
+                        *bus1_resp_d2 = 0; *bus1_resp_d3 = 0;
+                        *bus1_resp_valid = true;
+                    }
+                $;
+
+            else
+
+                if(grantedCmd == BUS_RD) then
+
+                    // BUS_RD: read miss
+                    if(suppliedDirty) then
+
+                        // Peer supplied dirty data; write it to memory for coherence
+                        $
+                            statRdTransactions++;
+                            prepareMemStore(grantedAddr,
+                                (BLOCK_SIZE == 4) ? WORD :
+                                (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
+                                snoopD0, snoopD1, snoopD2, snoopD3);
+                        $;
+
+                        do
+                            wait until(this_phase == 1);
+                            $ ok = m_outp->push(requestToMemory); $;
+                            if(not ok) then wait end if;
+                        while(not ok) end do;
+
+                        do
+                            wait until(this_phase == 0);
+                            $ hasToken = m_inp->peek(responseFromMemory); $;
+                            if(not hasToken) then wait end if;
+                        while(not hasToken) end do;
+
+                        $
+                            pulled = m_inp->pull(responseFromMemory);
+                            sitar::unpack(responseFromMemory, responseErr,
+                                responseData0, responseData1, responseData2, responseData3);
+                        $;
+
+                        // Return the dirty data to requester
+                        $
+                            if(grantedId == 0) {
+                                *bus0_resp_err = 0;
+                                *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
+                                *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
+                                *bus0_resp_valid = true;
+                            }
+                            else {
+                                *bus1_resp_err = 0;
+                                *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
+                                *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
+                                *bus1_resp_valid = true;
+                            }
+                        $;
+
+                    else
+
+                        // No dirty intervention; fetch from memory
+                        $
+                            statRdTransactions++;
+                            prepareMemLoad(grantedAddr);
+                        $;
+
+                        do
+                            wait until(this_phase == 1);
+                            $ ok = m_outp->push(requestToMemory); $;
+                            if(not ok) then wait end if;
+                        while(not ok) end do;
+
+                        do
+                            wait until(this_phase == 0);
+                            $ hasToken = m_inp->peek(responseFromMemory); $;
+                            if(not hasToken) then wait end if;
+                        while(not hasToken) end do;
+
+                        $
+                            pulled = m_inp->pull(responseFromMemory);
+                            sitar::unpack(responseFromMemory, responseErr,
+                                responseData0, responseData1, responseData2, responseData3);
+
+                            if(grantedId == 0) {
+                                *bus0_resp_err = responseErr;
+                                *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
+                                *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
+                                *bus0_resp_valid = true;
+                            }
+                            else {
+                                *bus1_resp_err = responseErr;
+                                *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
+                                *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
+                                *bus1_resp_valid = true;
+                            }
+                        $;
+
+                    end if;
+
+                else
+
+                    if(grantedCmd == BUS_RDX) then
+
+                        // BUS_RDX: write miss (exclusive)
+                        if(suppliedDirty) then
+
+                            // Peer supplied dirty data; give it directly to requester
+                            $
+                                statRdxTransactions++;
+
+                                if(grantedId == 0) {
+                                    *bus0_resp_err = 0;
+                                    *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
+                                    *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
+                                    *bus0_resp_valid = true;
+                                }
+                                else {
+                                    *bus1_resp_err = 0;
+                                    *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
+                                    *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
+                                    *bus1_resp_valid = true;
+                                }
+                            $;
+
+                            wait(BUS_SNOOP_DELAY, 0);
+
+                        else
+
+                            // No dirty data; fetch from memory
+                            $
+                                statRdxTransactions++;
+                                prepareMemLoad(grantedAddr);
+                            $;
+
+                            do
+                                wait until(this_phase == 1);
+                                $ ok = m_outp->push(requestToMemory); $;
+                                if(not ok) then wait end if;
+                            while(not ok) end do;
+
+                            do
+                                wait until(this_phase == 0);
+                                $ hasToken = m_inp->peek(responseFromMemory); $;
+                                if(not hasToken) then wait end if;
+                            while(not hasToken) end do;
+
+                            $
+                                pulled = m_inp->pull(responseFromMemory);
+                                sitar::unpack(responseFromMemory, responseErr,
+                                    responseData0, responseData1, responseData2, responseData3);
+
+                                if(grantedId == 0) {
+                                    *bus0_resp_err = responseErr;
+                                    *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
+                                    *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
+                                    *bus0_resp_valid = true;
+                                }
+                                else {
+                                    *bus1_resp_err = responseErr;
+                                    *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
+                                    *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
+                                    *bus1_resp_valid = true;
+                                }
+                            $;
+
+                        end if;
+
+                    end if;
+
+                end if;
+
+            end if;
+
+            end if;
+
+            // Toggle round-robin
+            $
+                rrTurn = 1 - rrTurn;
+            $;
+
+            wait(1, 0);
+
+        while(1) end do;
+
+    end behavior
+
+end procedure
 
 
-    // Instruction memory ports
-    inport im_inp : width 17
-    outport im_outp : width 22
 
+// =====================================================================
+// DualCore: two processors with private L1 caches sharing data memory
+// through MSI coherence bus.
+// =====================================================================
+module DualCore
 
-    // Data memory ports
+    // Core 0
+    procedure proc0 : Processor<40, 30, 3, 1000, 100000, 16, 0>
+    procedure icache0 : Cache<4, 4, 16, 4, 1, 0, 0, 0>
+    procedure dcache0 : Cache<2, 8, 16, 4, 1, 0, 0, 1>
+    procedure icache0_wb : WbEngine<16, 0>
+    procedure dcache0_wb : WbEngine<16, 1>
+
+    // Core 1
+    procedure proc1 : Processor<40, 30, 3, 1000, 100000, 16, 1>
+    procedure icache1 : Cache<4, 4, 16, 4, 1, 0, 1, 0>
+    procedure dcache1 : Cache<2, 8, 16, 4, 1, 0, 1, 1>
+    procedure icache1_wb : WbEngine<16, 0>
+    procedure dcache1_wb : WbEngine<16, 1>
+
+    // Coherence bus
+    procedure bus : CoherenceBus<16, 2, 2, 8, 4, 1, 0>
+
+    // External ports (connected to Top)
+    inport ic0_im_inp : width 17
+    outport ic0_im_outp : width 22
+
+    inport ic1_im_inp : width 17
+    outport ic1_im_outp : width 22
+
     inport dm_inp : width 17
     outport dm_outp : width 22
 
     decl $
+        bool proc0Done;
+        bool proc1Done;
     $
-
 
     init $
 
-        // Caches and engines share the memory ports
-        icache.m_inp = &im_inp;
-        icache.m_outp = &im_outp;
-        icache_wb.m_inp = &im_inp;
-        icache_wb.m_outp = &im_outp;
+        // ICache0 <-> instruction memory port 0
+        icache0.m_inp = &ic0_im_inp;
+        icache0.m_outp = &ic0_im_outp;
+        icache0_wb.m_inp = &ic0_im_inp;
+        icache0_wb.m_outp = &ic0_im_outp;
 
-        dcache.m_inp = &dm_inp;
-        dcache.m_outp = &dm_outp;
-        dcache_wb.m_inp = &dm_inp;
-        dcache_wb.m_outp = &dm_outp;
+        // ICache1 <-> instruction memory port 1
+        icache1.m_inp = &ic1_im_inp;
+        icache1.m_outp = &ic1_im_outp;
+        icache1_wb.m_inp = &ic1_im_inp;
+        icache1_wb.m_outp = &ic1_im_outp;
 
-        // ICACHE <-> its write-back engine
-        icache_wb.wb_pending = &icache.wbPending;
-        icache_wb.mem_busy = &icache.memBusy;
-        icache_wb.fe_waiting = &icache.feWaiting;
-        icache_wb.wb_block_addr = &icache.wbBlockAddr;
-        icache_wb.wb_size = &icache.wbSize;
-        icache_wb.wb_d0 = &icache.wbData0;
-        icache_wb.wb_d1 = &icache.wbData1;
-        icache_wb.wb_d2 = &icache.wbData2;
-        icache_wb.wb_d3 = &icache.wbData3;
-        icache_wb.wb_done_cnt = &icache.statWbDone;
+        // DCache0 and DCache1 <-> coherence bus memory port
+        dcache0.m_inp = &dm_inp;
+        dcache0.m_outp = &dm_outp;
+        dcache1.m_inp = &dm_inp;
+        dcache1.m_outp = &dm_outp;
 
-        // DCACHE <-> its write engine
-        dcache_wb.wb_pending = &dcache.wbPending;
-        dcache_wb.mem_busy = &dcache.memBusy;
-        dcache_wb.fe_waiting = &dcache.feWaiting;
-        dcache_wb.wb_block_addr = &dcache.wbBlockAddr;
-        dcache_wb.wb_size = &dcache.wbSize;
-        dcache_wb.wb_d0 = &dcache.wbData0;
-        dcache_wb.wb_d1 = &dcache.wbData1;
-        dcache_wb.wb_d2 = &dcache.wbData2;
-        dcache_wb.wb_d3 = &dcache.wbData3;
-        dcache_wb.wb_done_cnt = &dcache.statWbDone;
+        // Coherence bus <-> memory port
+        bus.m_inp = &dm_inp;
+        bus.m_outp = &dm_outp;
 
-        // Processor <-> ICACHE
-        proc.ic_req_valid = &icache.req_valid;
-        proc.ic_resp_valid = &icache.resp_valid;
+        // Coherence bus <-> data caches (for snooping)
+        bus.dcache0 = &dcache0;
+        bus.dcache1 = &dcache1;
 
-        proc.ic_req_addr = &icache.req_addr;
-        proc.ic_req_type = &icache.req_type;
-        proc.ic_req_size = &icache.req_size;
+        // Bus channels: DCache0 <-> bus
+        bus.bus0_req_valid = &dcache0.bus_req_valid;
+        bus.bus0_resp_valid = &dcache0.bus_resp_valid;
+        bus.bus0_req_cmd = &dcache0.bus_req_cmd;
+        bus.bus0_req_addr = &dcache0.bus_req_addr;
+        bus.bus0_req_size = &dcache0.bus_req_size;
+        bus.bus0_resp_err = &dcache0.bus_resp_err;
+        bus.bus0_resp_d0 = &dcache0.bus_resp_d0;
+        bus.bus0_resp_d1 = &dcache0.bus_resp_d1;
+        bus.bus0_resp_d2 = &dcache0.bus_resp_d2;
+        bus.bus0_resp_d3 = &dcache0.bus_resp_d3;
 
-        proc.ic_resp_err = &icache.resp_err;
+        // Bus channels: DCache1 <-> bus
+        bus.bus1_req_valid = &dcache1.bus_req_valid;
+        bus.bus1_resp_valid = &dcache1.bus_resp_valid;
+        bus.bus1_req_cmd = &dcache1.bus_req_cmd;
+        bus.bus1_req_addr = &dcache1.bus_req_addr;
+        bus.bus1_req_size = &dcache1.bus_req_size;
+        bus.bus1_resp_err = &dcache1.bus_resp_err;
+        bus.bus1_resp_d0 = &dcache1.bus_resp_d0;
+        bus.bus1_resp_d1 = &dcache1.bus_resp_d1;
+        bus.bus1_resp_d2 = &dcache1.bus_resp_d2;
+        bus.bus1_resp_d3 = &dcache1.bus_resp_d3;
 
-        proc.ic_resp_data0 = &icache.resp_data0;
-        proc.ic_resp_data1 = &icache.resp_data1;
-        proc.ic_resp_data2 = &icache.resp_data2;
-        proc.ic_resp_data3 = &icache.resp_data3;
+        // WbEngine bus channels for dcache write-backs through coherence bus
+        bus.wb0_bus_req_valid = &dcache0.wb_bus_req_valid;
+        bus.wb0_bus_resp_valid = &dcache0.wb_bus_resp_valid;
+        bus.wb0_bus_addr = &dcache0.wb_bus_addr;
+        bus.wb0_bus_size = &dcache0.wb_bus_size;
+        bus.wb0_bus_d0 = &dcache0.wb_bus_d0;
+        bus.wb0_bus_d1 = &dcache0.wb_bus_d1;
+        bus.wb0_bus_d2 = &dcache0.wb_bus_d2;
+        bus.wb0_bus_d3 = &dcache0.wb_bus_d3;
+        bus.wb0_bus_err = &dcache0.wb_bus_err;
 
+        bus.wb1_bus_req_valid = &dcache1.wb_bus_req_valid;
+        bus.wb1_bus_resp_valid = &dcache1.wb_bus_resp_valid;
+        bus.wb1_bus_addr = &dcache1.wb_bus_addr;
+        bus.wb1_bus_size = &dcache1.wb_bus_size;
+        bus.wb1_bus_d0 = &dcache1.wb_bus_d0;
+        bus.wb1_bus_d1 = &dcache1.wb_bus_d1;
+        bus.wb1_bus_d2 = &dcache1.wb_bus_d2;
+        bus.wb1_bus_d3 = &dcache1.wb_bus_d3;
+        bus.wb1_bus_err = &dcache1.wb_bus_err;
 
-        // Processor <-> DCACHE
-        proc.dc_req_valid = &dcache.req_valid;
-        proc.dc_resp_valid = &dcache.resp_valid;
+        // Processor <-> ICache0
+        proc0.ic_req_valid = &icache0.req_valid;
+        proc0.ic_resp_valid = &icache0.resp_valid;
+        proc0.ic_req_addr = &icache0.req_addr;
+        proc0.ic_req_type = &icache0.req_type;
+        proc0.ic_req_size = &icache0.req_size;
+        proc0.ic_resp_err = &icache0.resp_err;
+        proc0.ic_resp_data0 = &icache0.resp_data0;
+        proc0.ic_resp_data1 = &icache0.resp_data1;
+        proc0.ic_resp_data2 = &icache0.resp_data2;
+        proc0.ic_resp_data3 = &icache0.resp_data3;
 
-        proc.dc_req_addr = &dcache.req_addr;
-        proc.dc_req_type = &dcache.req_type;
-        proc.dc_req_size = &dcache.req_size;
+        // Processor <-> DCache0
+        proc0.dc_req_valid = &dcache0.req_valid;
+        proc0.dc_resp_valid = &dcache0.resp_valid;
+        proc0.dc_req_addr = &dcache0.req_addr;
+        proc0.dc_req_type = &dcache0.req_type;
+        proc0.dc_req_size = &dcache0.req_size;
+        proc0.dc_resp_err = &dcache0.resp_err;
+        proc0.dc_resp_data0 = &dcache0.resp_data0;
+        proc0.dc_resp_data1 = &dcache0.resp_data1;
+        proc0.dc_resp_data2 = &dcache0.resp_data2;
+        proc0.dc_resp_data3 = &dcache0.resp_data3;
 
-        proc.dc_resp_err = &dcache.resp_err;
+        // Processor <-> ICache1
+        proc1.ic_req_valid = &icache1.req_valid;
+        proc1.ic_resp_valid = &icache1.resp_valid;
+        proc1.ic_req_addr = &icache1.req_addr;
+        proc1.ic_req_type = &icache1.req_type;
+        proc1.ic_req_size = &icache1.req_size;
+        proc1.ic_resp_err = &icache1.resp_err;
+        proc1.ic_resp_data0 = &icache1.resp_data0;
+        proc1.ic_resp_data1 = &icache1.resp_data1;
+        proc1.ic_resp_data2 = &icache1.resp_data2;
+        proc1.ic_resp_data3 = &icache1.resp_data3;
 
-        proc.dc_resp_data0 = &dcache.resp_data0;
-        proc.dc_resp_data1 = &dcache.resp_data1;
-        proc.dc_resp_data2 = &dcache.resp_data2;
-        proc.dc_resp_data3 = &dcache.resp_data3;
+        // Processor <-> DCache1
+        proc1.dc_req_valid = &dcache1.req_valid;
+        proc1.dc_resp_valid = &dcache1.resp_valid;
+        proc1.dc_req_addr = &dcache1.req_addr;
+        proc1.dc_req_type = &dcache1.req_type;
+        proc1.dc_req_size = &dcache1.req_size;
+        proc1.dc_resp_err = &dcache1.resp_err;
+        proc1.dc_resp_data0 = &dcache1.resp_data0;
+        proc1.dc_resp_data1 = &dcache1.resp_data1;
+        proc1.dc_resp_data2 = &dcache1.resp_data2;
+        proc1.dc_resp_data3 = &dcache1.resp_data3;
+
+        // Coordinated stop
+        proc0.my_done = &proc0Done;
+        proc0.peer_done = &proc1Done;
+        proc1.my_done = &proc1Done;
+        proc1.peer_done = &proc0Done;
+
+        proc0Done = false;
+        proc1Done = false;
+
+        // ICache write-back engines
+        icache0_wb.wb_pending = &icache0.wbPending;
+        icache0_wb.mem_busy = &icache0.memBusy;
+        icache0_wb.fe_waiting = &icache0.feWaiting;
+        icache0_wb.wb_block_addr = &icache0.wbBlockAddr;
+        icache0_wb.wb_size = &icache0.wbSize;
+        icache0_wb.wb_d0 = &icache0.wbData0;
+        icache0_wb.wb_d1 = &icache0.wbData1;
+        icache0_wb.wb_d2 = &icache0.wbData2;
+        icache0_wb.wb_d3 = &icache0.wbData3;
+        icache0_wb.wb_done_cnt = &icache0.statWbDone;
+
+        icache1_wb.wb_pending = &icache1.wbPending;
+        icache1_wb.mem_busy = &icache1.memBusy;
+        icache1_wb.fe_waiting = &icache1.feWaiting;
+        icache1_wb.wb_block_addr = &icache1.wbBlockAddr;
+        icache1_wb.wb_size = &icache1.wbSize;
+        icache1_wb.wb_d0 = &icache1.wbData0;
+        icache1_wb.wb_d1 = &icache1.wbData1;
+        icache1_wb.wb_d2 = &icache1.wbData2;
+        icache1_wb.wb_d3 = &icache1.wbData3;
+        icache1_wb.wb_done_cnt = &icache1.statWbDone;
+
+        // WbEngine bus channel wiring (for dcache write-backs through bus)
+        // Note: icache WbEngines use direct memory (USE_BUS=0), so these are unused
+        // but we wire them for consistency
+        icache0_wb.wb_bus_req_valid = &icache0.wb_bus_req_valid;
+        icache0_wb.wb_bus_resp_valid = &icache0.wb_bus_resp_valid;
+        icache0_wb.wb_bus_addr = &icache0.wb_bus_addr;
+        icache0_wb.wb_bus_size = &icache0.wb_bus_size;
+        icache0_wb.wb_bus_d0 = &icache0.wb_bus_d0;
+        icache0_wb.wb_bus_d1 = &icache0.wb_bus_d1;
+        icache0_wb.wb_bus_d2 = &icache0.wb_bus_d2;
+        icache0_wb.wb_bus_d3 = &icache0.wb_bus_d3;
+        icache0_wb.wb_bus_err = &icache0.wb_bus_err;
+
+        icache1_wb.wb_bus_req_valid = &icache1.wb_bus_req_valid;
+        icache1_wb.wb_bus_resp_valid = &icache1.wb_bus_resp_valid;
+        icache1_wb.wb_bus_addr = &icache1.wb_bus_addr;
+        icache1_wb.wb_bus_size = &icache1.wb_bus_size;
+        icache1_wb.wb_bus_d0 = &icache1.wb_bus_d0;
+        icache1_wb.wb_bus_d1 = &icache1.wb_bus_d1;
+        icache1_wb.wb_bus_d2 = &icache1.wb_bus_d2;
+        icache1_wb.wb_bus_d3 = &icache1.wb_bus_d3;
+        icache1_wb.wb_bus_err = &icache1.wb_bus_err;
+
+        // DCache write-back engines (use bus, USE_BUS=1)
+        dcache0_wb.wb_pending = &dcache0.wbPending;
+        dcache0_wb.mem_busy = &dcache0.memBusy;
+        dcache0_wb.fe_waiting = &dcache0.feWaiting;
+        dcache0_wb.wb_block_addr = &dcache0.wbBlockAddr;
+        dcache0_wb.wb_size = &dcache0.wbSize;
+        dcache0_wb.wb_d0 = &dcache0.wbData0;
+        dcache0_wb.wb_d1 = &dcache0.wbData1;
+        dcache0_wb.wb_d2 = &dcache0.wbData2;
+        dcache0_wb.wb_d3 = &dcache0.wbData3;
+        dcache0_wb.wb_done_cnt = &dcache0.statWbDone;
+        dcache0_wb.wb_bus_req_valid = &dcache0.wb_bus_req_valid;
+        dcache0_wb.wb_bus_resp_valid = &dcache0.wb_bus_resp_valid;
+        dcache0_wb.wb_bus_addr = &dcache0.wb_bus_addr;
+        dcache0_wb.wb_bus_size = &dcache0.wb_bus_size;
+        dcache0_wb.wb_bus_d0 = &dcache0.wb_bus_d0;
+        dcache0_wb.wb_bus_d1 = &dcache0.wb_bus_d1;
+        dcache0_wb.wb_bus_d2 = &dcache0.wb_bus_d2;
+        dcache0_wb.wb_bus_d3 = &dcache0.wb_bus_d3;
+        dcache0_wb.wb_bus_err = &dcache0.wb_bus_err;
+
+        dcache1_wb.wb_pending = &dcache1.wbPending;
+        dcache1_wb.mem_busy = &dcache1.memBusy;
+        dcache1_wb.fe_waiting = &dcache1.feWaiting;
+        dcache1_wb.wb_block_addr = &dcache1.wbBlockAddr;
+        dcache1_wb.wb_size = &dcache1.wbSize;
+        dcache1_wb.wb_d0 = &dcache1.wbData0;
+        dcache1_wb.wb_d1 = &dcache1.wbData1;
+        dcache1_wb.wb_d2 = &dcache1.wbData2;
+        dcache1_wb.wb_d3 = &dcache1.wbData3;
+        dcache1_wb.wb_done_cnt = &dcache1.statWbDone;
+        dcache1_wb.wb_bus_req_valid = &dcache1.wb_bus_req_valid;
+        dcache1_wb.wb_bus_resp_valid = &dcache1.wb_bus_resp_valid;
+        dcache1_wb.wb_bus_addr = &dcache1.wb_bus_addr;
+        dcache1_wb.wb_bus_size = &dcache1.wb_bus_size;
+        dcache1_wb.wb_bus_d0 = &dcache1.wb_bus_d0;
+        dcache1_wb.wb_bus_d1 = &dcache1.wb_bus_d1;
+        dcache1_wb.wb_bus_d2 = &dcache1.wb_bus_d2;
+        dcache1_wb.wb_bus_d3 = &dcache1.wb_bus_d3;
+        dcache1_wb.wb_bus_err = &dcache1.wb_bus_err;
 
     $
 
-
-    // Run all components in parallel
     behavior
 
         [
-            run proc
+            run proc0
             ||
-            run icache
+            run proc1
             ||
-            run dcache
+            run icache0
             ||
-            run icache_wb
+            run icache1
             ||
-            run dcache_wb
+            run dcache0
+            ||
+            run dcache1
+            ||
+            run icache0_wb
+            ||
+            run icache1_wb
+            ||
+            run dcache0_wb
+            ||
+            run dcache1_wb
+            ||
+            run bus
         ];
 
     end behavior
@@ -2507,7 +3069,6 @@ module Memory
         uint8_t requestType;
         uint8_t requestSize;
 
-        // Data carried by a STORE (write-back) request
         uint32_t reqData0;
         uint32_t reqData1;
         uint32_t reqData2;
@@ -2526,98 +3087,51 @@ module Memory
         bool hasToken;
 
         int getSizeBytes(int size) {
-
             if(size == WORD) return 4;
-
             if(size == DOUBLEWORD) return 8;
-
             return 16;
         }
 
-
         bool isAligned(uint32_t addr, int size) {
-
-            if(size == WORD)
-                return (addr & 3) == 0;
-
-            if(size == DOUBLEWORD)
-                return (addr & 7) == 0;
-
+            if(size == WORD) return (addr & 3) == 0;
+            if(size == DOUBLEWORD) return (addr & 7) == 0;
             return (addr & 15) == 0;
         }
 
-
         void read_memory(uint32_t addr, int size) {
-
-            responseData0 = 0;
-            responseData1 = 0;
-            responseData2 = 0;
-            responseData3 = 0;
-
+            responseData0 = 0; responseData1 = 0;
+            responseData2 = 0; responseData3 = 0;
             uint32_t d[4] = {0, 0, 0, 0};
-
             int bytes = getSizeBytes(size);
-
             for(int i = 0; i < bytes / 4; i++) {
-
                 int k = addr + i * 4;
-
                 d[i] =
                     ((uint32_t)mem[k] << 24) |
                     ((uint32_t)mem[k+1] << 16) |
                     ((uint32_t)mem[k+2] << 8) |
                     ((uint32_t)mem[k+3]);
-
             }
-
-            responseData0 = d[0];
-            responseData1 = d[1];
-            responseData2 = d[2];
-            responseData3 = d[3];
-
+            responseData0 = d[0]; responseData1 = d[1];
+            responseData2 = d[2]; responseData3 = d[3];
         }
-
 
         void write_word(uint32_t addr, uint32_t data) {
-
-            mem[addr] =
-                (data >> 24) & 0xff;
-
-            mem[addr+1] =
-                (data >> 16) & 0xff;
-
-            mem[addr+2] =
-                (data >> 8) & 0xff;
-
-            mem[addr+3] =
-                data & 0xff;
-
+            mem[addr] = (data >> 24) & 0xff;
+            mem[addr+1] = (data >> 16) & 0xff;
+            mem[addr+2] = (data >> 8) & 0xff;
+            mem[addr+3] = data & 0xff;
         }
 
-
-        // Write the data carried by the request into memory
         void write_block(uint32_t addr, int size) {
-
-            uint32_t d[4] = {
-                reqData0,
-                reqData1,
-                reqData2,
-                reqData3
-            };
-
+            uint32_t d[4] = { reqData0, reqData1, reqData2, reqData3 };
             int bytes = getSizeBytes(size);
-
             for(int i = 0; i < bytes / 4; i++) {
-
                 int k = addr + i * 4;
-
                 mem[k] = (d[i] >> 24) & 0xff;
                 mem[k+1] = (d[i] >> 16) & 0xff;
                 mem[k+2] = (d[i] >> 8) & 0xff;
                 mem[k+3] = d[i] & 0xff;
-
             }
-
         }
 
     $
@@ -2626,12 +3140,10 @@ module Memory
     init $
 
         mem.resize(1024);
-
         for(int i = 0; i < 1024; i++)
             mem[i] = i & 0xff;
 
         memDelay = MEMORY_DELAY;
-
         if(const char* e = std::getenv("MEMORY_DELAY"))
             memDelay = std::atoi(e);
 
@@ -2642,12 +3154,10 @@ module Memory
 
         do
 
-            // Wait for request
             wait until(this_phase == 0);
 
             $
-                hasToken =
-                    inp.peek(requestFromCache);
+                hasToken = inp.peek(requestFromCache);
             $;
 
             if(not hasToken) then
@@ -2657,141 +3167,51 @@ module Memory
             if(hasToken) then
 
                 $
-                    pulled =
-                        inp.pull(requestFromCache);
+                    pulled = inp.pull(requestFromCache);
+                    sitar::unpack(requestFromCache,
+                        requestAddr, requestType, requestSize,
+                        reqData0, reqData1, reqData2, reqData3);
 
-                    sitar::unpack(
-                        requestFromCache,
-                        requestAddr,
-                        requestType,
-                        requestSize,
-                        reqData0,
-                        reqData1,
-                        reqData2,
-                        reqData3
-                    );
-
-                    responseData0 = 0;
-                    responseData1 = 0;
-                    responseData2 = 0;
-                    responseData3 = 0;
-
+                    responseData0 = 0; responseData1 = 0;
+                    responseData2 = 0; responseData3 = 0;
                     responseErr = 0;
 
-                    int bytes =
-                        getSizeBytes(requestSize);
+                    int bytes = getSizeBytes(requestSize);
 
-
-                    // Bounds check
                     if(requestAddr + bytes > 1024) {
-
                         responseErr = 1;
-
-                        log << endl
-                            << "Memory: OUT OF BOUNDS "
-                            << "Addr="
-                            << requestAddr;
-
+                        log << endl << "Memory: OUT OF BOUNDS Addr=" << requestAddr;
                     }
-
-                    // Alignment check
-                    else if(!isAligned(
-                        requestAddr,
-                        requestSize
-                    )) {
-
+                    else if(!isAligned(requestAddr, requestSize)) {
                         responseErr = 2;
-
-                        log << endl
-                            << "Memory: ALIGNMENT ERROR "
-                            << "Addr="
-                            << requestAddr;
-
+                        log << endl << "Memory: ALIGNMENT ERROR Addr=" << requestAddr;
                     }
-
                     else {
-
-                        if(requestType == IFETCH) {
-
-                            read_memory(
-                                requestAddr,
-                                requestSize
-                            );
-
+                        if(requestType == IFETCH || requestType == LOAD) {
+                            read_memory(requestAddr, requestSize);
                         }
-
-                        else if(requestType == LOAD) {
-
-                            read_memory(
-                                requestAddr,
-                                requestSize
-                            );
-
-                        }
-
                         else if(requestType == STORE) {
-
-                            write_block(
-                                requestAddr,
-                                requestSize
-                            );
-
-                            log << endl
-                                << "Memory: WRITE-BACK received "
-                                << "addr=" << requestAddr
-                                << " size=" << (int)requestSize
-                                << " data0=" << reqData0;
-
+                            write_block(requestAddr, requestSize);
                         }
-
                         else if(requestType == ATOMICLOADSTORE) {
-
-                            read_memory(
-                                requestAddr,
-                                requestSize
-                            );
-
-                            write_word(
-                                requestAddr,
-                                0x11223344
-                            );
-
+                            read_memory(requestAddr, requestSize);
+                            write_word(requestAddr, 0x11223344);
                         }
-
                     }
-
                 $;
 
-
-                // Memory latency
                 wait(memDelay, 0);
 
-
-                // Send response
                 $
-                    sitar::pack(
-                        responseToCache,
+                    sitar::pack(responseToCache,
                         responseErr,
-                        responseData0,
-                        responseData1,
-                        responseData2,
-                        responseData3
-                    );
+                        responseData0, responseData1, responseData2, responseData3);
                 $;
 
-
                 do
-
                     wait until(this_phase == 1);
-
-                    $
-                        ok = outp.push(responseToCache);
-                    $;
-
-                    if(not ok) then
-                        wait
-                    end if;
-
+                    $ ok = outp.push(responseToCache); $;
+                    if(not ok) then wait end if;
                 while(not ok) end do;
 
             end if;
