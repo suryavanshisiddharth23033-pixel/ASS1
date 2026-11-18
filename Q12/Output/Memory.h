@@ -4,7 +4,7 @@
 	//======================================
 	//file Memory.h                                                  
 	//Describes module Memory                                      
-	//Auto-generated from input file "model.sitar" on 2026-11-17 at time 0:42:58   
+	//Auto-generated from input file "model.sitar" on 2026-11-18 at time 8:36:9   
 	 //(This design unit is parameterized. Generating code into a .h file only) 
 	
 	//======================================
@@ -16,15 +16,15 @@
 	#include"sitar_time.h"
 	//user included files
 	 
-//----code block from file model.sitar, line:3039 ----
+//----code block from file model.sitar, line:3445 ----
 #include <cstdlib>
 //----end code block-------
 
-//----code block from file model.sitar, line:3040 ----
+//----code block from file model.sitar, line:3446 ----
 #include <vector>
 //----end code block-------
 
-//----code block from file model.sitar, line:3041 ----
+//----code block from file model.sitar, line:3447 ----
 #include <cstdint>
 //----end code block-------
 
@@ -63,7 +63,7 @@
 			 
 inport<22> inp;
 outport<17> outp;
-//----code block from file model.sitar, line:3044 ----
+//----code block from file model.sitar, line:3450 ----
 
 
         enum MemOpType {
@@ -192,7 +192,7 @@ addInport(&inp,"inp");
 outp.setInstanceId("outp");
 addOutport(&outp,"outp");
 
-//----code block from file model.sitar, line:3140 ----
+//----code block from file model.sitar, line:3546 ----
 
 
         mem.resize(1024);
@@ -249,7 +249,7 @@ switch(_pointer[0])
 
 case 0 :
 {
-//do-while statement , line:3155
+//do-while statement , line:3561
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -260,7 +260,7 @@ switch(_pointer[1])
 case 0:
 {
 
-//wait-until statement , line:3157
+//wait-until statement , line:3563
 if(((((((current_time.phase()))==(0))))))
  _incrementPointer(1);
 else
@@ -270,7 +270,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file model.sitar, line:3159 ----
+//----code block from file model.sitar, line:3565 ----
 
                 hasToken = inp.peek(requestFromCache);
             
@@ -282,7 +282,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:3163
+//if statement , line:3569
 if((((!((hasToken))))))
 _if_flag[0]=true;
 else
@@ -302,7 +302,7 @@ switch(_pointer[2])
 case 0:
 {
 
-//wait statement , line:3164
+//wait statement , line:3570
 _timer[0] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(2);
 }
@@ -341,7 +341,7 @@ if((_if_flag[0]==true && _pointer[2]>=_pointer_last_value[2]) || (_if_flag[0]==f
 case 4:
 {
 
-//if statement , line:3167
+//if statement , line:3573
 if((((((hasToken))))))
 _if_flag[1]=true;
 else
@@ -362,7 +362,7 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file model.sitar, line:3169 ----
+//----code block from file model.sitar, line:3575 ----
 
                     pulled = inp.pull(requestFromCache);
                     sitar::unpack(requestFromCache,
@@ -392,6 +392,14 @@ case 0:
                         }
                         else if(requestType == ATOMICLOADSTORE) {
                             read_memory(requestAddr, requestSize);
+                            log << endl
+                                << "MEM ATOMIC addr=" << requestAddr
+                                << " size=" << (int)requestSize
+                                << " old0=" << responseData0
+                                << " old1=" << responseData1
+                                << " old2=" << responseData2
+                                << " old3=" << responseData3
+                                << " cycle=" << current_time.cycle();
                             write_word(requestAddr, 0x11223344);
                         }
                     }
@@ -404,7 +412,7 @@ case 0:
 case 1:
 {
 
-//wait-for -time statement , line:3203
+//wait-for -time statement , line:3617
 _timer[1] = sitar::time(current_time)+sitar::time(((memDelay)),((0)));
  _incrementPointer(3);
 }
@@ -420,7 +428,7 @@ case 3:
 { 
  
 //code_block_statement 
-//----code block from file model.sitar, line:3205 ----
+//----code block from file model.sitar, line:3619 ----
 
                     sitar::pack(responseToCache,
                         responseErr,
@@ -433,7 +441,7 @@ case 3:
 
 case 4 :
 {
-//do-while statement , line:3211
+//do-while statement , line:3625
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -444,7 +452,7 @@ switch(_pointer[4])
 case 0:
 {
 
-//wait-until statement , line:3212
+//wait-until statement , line:3626
 if(((((((current_time.phase()))==(1))))))
  _incrementPointer(4);
 else
@@ -454,7 +462,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file model.sitar, line:3213 ----
+//----code block from file model.sitar, line:3627 ----
  ok = outp.push(responseToCache); 
 //----end code block-------
 
@@ -464,7 +472,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:3214
+//if statement , line:3628
 if((((!((ok))))))
 _if_flag[2]=true;
 else
@@ -484,7 +492,7 @@ switch(_pointer[5])
 case 0:
 {
 
-//wait statement , line:3214
+//wait statement , line:3628
 _timer[2] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(5);
 }
@@ -542,7 +550,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3211 in file model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3625 in file model.sitar";
 		_pointer[4]=0;                                                               
 		_incrementPointer(3);                                                                    
 	}                                                                                              
@@ -604,7 +612,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3155 in file model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3561 in file model.sitar";
 		_pointer[1]=0;                                                               
 		_incrementPointer(0);                                                                    
 	}                                                                                              
