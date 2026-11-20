@@ -2,7 +2,7 @@
 	//====================================================================
 	//file DualCore.cpp                                                 
 	//Describes module DualCore                                      
-	//Auto-generated from input "model.sitar" on 2026-11-18 at time 8:36:9   
+	//Auto-generated from input "model.sitar" on 2026-11-17 at time 0:42:58   
 	//====================================================================
 	#include"DualCore.h"
 	#include<iostream>
@@ -69,13 +69,21 @@ addProcedure(&dcache1_wb,"dcache1_wb");
 bus.setInstanceId("bus");
 addProcedure(&bus,"bus");
 
-//---Initializing inport im_inp---
-im_inp.setInstanceId("im_inp");
-addInport(&im_inp,"im_inp");
+//---Initializing inport ic0_im_inp---
+ic0_im_inp.setInstanceId("ic0_im_inp");
+addInport(&ic0_im_inp,"ic0_im_inp");
 
-//---Initializing outport im_outp---
-im_outp.setInstanceId("im_outp");
-addOutport(&im_outp,"im_outp");
+//---Initializing outport ic0_im_outp---
+ic0_im_outp.setInstanceId("ic0_im_outp");
+addOutport(&ic0_im_outp,"ic0_im_outp");
+
+//---Initializing inport ic1_im_inp---
+ic1_im_inp.setInstanceId("ic1_im_inp");
+addInport(&ic1_im_inp,"ic1_im_inp");
+
+//---Initializing outport ic1_im_outp---
+ic1_im_outp.setInstanceId("ic1_im_outp");
+addOutport(&ic1_im_outp,"ic1_im_outp");
 
 //---Initializing inport dm_inp---
 dm_inp.setInstanceId("dm_inp");
@@ -85,22 +93,34 @@ addInport(&dm_inp,"dm_inp");
 dm_outp.setInstanceId("dm_outp");
 addOutport(&dm_outp,"dm_outp");
 
-//----code block from file model.sitar, line:3173 ----
+//----code block from file model.sitar, line:2779 ----
 
 
-        // Coherence bus <-> instruction memory port
-        bus.im_inp = &im_inp;
-        bus.im_outp = &im_outp;
+        // ICache0 <-> instruction memory port 0
+        icache0.m_inp = &ic0_im_inp;
+        icache0.m_outp = &ic0_im_outp;
+        icache0_wb.m_inp = &ic0_im_inp;
+        icache0_wb.m_outp = &ic0_im_outp;
 
-        // Coherence bus <-> data memory port
-        bus.dm_inp = &dm_inp;
-        bus.dm_outp = &dm_outp;
+        // ICache1 <-> instruction memory port 1
+        icache1.m_inp = &ic1_im_inp;
+        icache1.m_outp = &ic1_im_outp;
+        icache1_wb.m_inp = &ic1_im_inp;
+        icache1_wb.m_outp = &ic1_im_outp;
+
+        // DCache0 and DCache1 <-> coherence bus memory port
+        dcache0.m_inp = &dm_inp;
+        dcache0.m_outp = &dm_outp;
+        dcache1.m_inp = &dm_inp;
+        dcache1.m_outp = &dm_outp;
+
+        // Coherence bus <-> memory port
+        bus.m_inp = &dm_inp;
+        bus.m_outp = &dm_outp;
 
         // Coherence bus <-> data caches (for snooping)
         bus.dcache0 = &dcache0;
         bus.dcache1 = &dcache1;
-        bus.icache0 = &icache0;
-        bus.icache1 = &icache1;
 
         // Bus channels: DCache0 <-> bus
         bus.bus0_req_valid = &dcache0.bus_req_valid;
@@ -125,30 +145,6 @@ addOutport(&dm_outp,"dm_outp");
         bus.bus1_resp_d1 = &dcache1.bus_resp_d1;
         bus.bus1_resp_d2 = &dcache1.bus_resp_d2;
         bus.bus1_resp_d3 = &dcache1.bus_resp_d3;
-
-        // Bus channels: ICache0 <-> bus
-        bus.bus_ic0_req_valid = &icache0.bus_req_valid;
-        bus.bus_ic0_resp_valid = &icache0.bus_resp_valid;
-        bus.bus_ic0_req_cmd = &icache0.bus_req_cmd;
-        bus.bus_ic0_req_addr = &icache0.bus_req_addr;
-        bus.bus_ic0_req_size = &icache0.bus_req_size;
-        bus.bus_ic0_resp_err = &icache0.bus_resp_err;
-        bus.bus_ic0_resp_d0 = &icache0.bus_resp_d0;
-        bus.bus_ic0_resp_d1 = &icache0.bus_resp_d1;
-        bus.bus_ic0_resp_d2 = &icache0.bus_resp_d2;
-        bus.bus_ic0_resp_d3 = &icache0.bus_resp_d3;
-
-        // Bus channels: ICache1 <-> bus
-        bus.bus_ic1_req_valid = &icache1.bus_req_valid;
-        bus.bus_ic1_resp_valid = &icache1.bus_resp_valid;
-        bus.bus_ic1_req_cmd = &icache1.bus_req_cmd;
-        bus.bus_ic1_req_addr = &icache1.bus_req_addr;
-        bus.bus_ic1_req_size = &icache1.bus_req_size;
-        bus.bus_ic1_resp_err = &icache1.bus_resp_err;
-        bus.bus_ic1_resp_d0 = &icache1.bus_resp_d0;
-        bus.bus_ic1_resp_d1 = &icache1.bus_resp_d1;
-        bus.bus_ic1_resp_d2 = &icache1.bus_resp_d2;
-        bus.bus_ic1_resp_d3 = &icache1.bus_resp_d3;
 
         // WbEngine bus channels for dcache write-backs through coherence bus
         bus.wb0_bus_req_valid = &dcache0.wb_bus_req_valid;
@@ -367,7 +363,7 @@ switch(_pointer[0])
 
 case 0: {
 
-//parallel statement begins, line 3406
+//parallel statement begins, line 3000
 //one branch of parallel statement, using pointer 1
 switch(_pointer[1])
 {
@@ -375,7 +371,7 @@ switch(_pointer[1])
 case 0:
 { 
  
-//run procedure statement , line:3407
+//run procedure statement , line:3001
 proc0.run(current_time);
 if(proc0._terminated==1)
 {
@@ -402,7 +398,7 @@ switch(_pointer[2])
 case 0:
 { 
  
-//run procedure statement , line:3409
+//run procedure statement , line:3003
 proc1.run(current_time);
 if(proc1._terminated==1)
 {
@@ -429,7 +425,7 @@ switch(_pointer[3])
 case 0:
 { 
  
-//run procedure statement , line:3411
+//run procedure statement , line:3005
 icache0.run(current_time);
 if(icache0._terminated==1)
 {
@@ -456,7 +452,7 @@ switch(_pointer[4])
 case 0:
 { 
  
-//run procedure statement , line:3413
+//run procedure statement , line:3007
 icache1.run(current_time);
 if(icache1._terminated==1)
 {
@@ -483,7 +479,7 @@ switch(_pointer[5])
 case 0:
 { 
  
-//run procedure statement , line:3415
+//run procedure statement , line:3009
 dcache0.run(current_time);
 if(dcache0._terminated==1)
 {
@@ -510,7 +506,7 @@ switch(_pointer[6])
 case 0:
 { 
  
-//run procedure statement , line:3417
+//run procedure statement , line:3011
 dcache1.run(current_time);
 if(dcache1._terminated==1)
 {
@@ -537,7 +533,7 @@ switch(_pointer[7])
 case 0:
 { 
  
-//run procedure statement , line:3419
+//run procedure statement , line:3013
 icache0_wb.run(current_time);
 if(icache0_wb._terminated==1)
 {
@@ -564,7 +560,7 @@ switch(_pointer[8])
 case 0:
 { 
  
-//run procedure statement , line:3421
+//run procedure statement , line:3015
 icache1_wb.run(current_time);
 if(icache1_wb._terminated==1)
 {
@@ -591,7 +587,7 @@ switch(_pointer[9])
 case 0:
 { 
  
-//run procedure statement , line:3423
+//run procedure statement , line:3017
 dcache0_wb.run(current_time);
 if(dcache0_wb._terminated==1)
 {
@@ -618,7 +614,7 @@ switch(_pointer[10])
 case 0:
 { 
  
-//run procedure statement , line:3425
+//run procedure statement , line:3019
 dcache1_wb.run(current_time);
 if(dcache1_wb._terminated==1)
 {
@@ -645,7 +641,7 @@ switch(_pointer[11])
 case 0:
 { 
  
-//run procedure statement , line:3427
+//run procedure statement , line:3021
 bus.run(current_time);
 if(bus._terminated==1)
 {
