@@ -4,7 +4,7 @@
 	//======================================
 	//file DualCore.h                                                  
 	//Describes module DualCore                                      
-	//Auto-generated from input file "model.sitar" on 2026-11-18 at time 8:36:9   
+	//Auto-generated from input file "model.sitar" on 2026-11-17 at time 0:42:58   
 	
 	//(This design unit is not parameterized. Generating code into .h and .cpp files) 
 	//======================================
@@ -71,11 +71,13 @@ Cache<2, 8, 16, 4, 1, 0, 1, 1> dcache1;
 WbEngine<16, 0> icache1_wb;
 WbEngine<16, 1> dcache1_wb;
 CoherenceBus<16, 2, 2, 8, 4, 1, 0> bus;
-inport<17> im_inp;
-outport<22> im_outp;
+inport<17> ic0_im_inp;
+outport<22> ic0_im_outp;
+inport<17> ic1_im_inp;
+outport<22> ic1_im_outp;
 inport<17> dm_inp;
 outport<22> dm_outp;
-//----code block from file model.sitar, line:3168 ----
+//----code block from file model.sitar, line:2774 ----
 
         bool proc0Done;
         bool proc1Done;
