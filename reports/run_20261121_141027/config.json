@@ -1,0 +1,348 @@
+{
+  "build": true,
+  "expected_instructions": 1000,
+  "git_commit": "34795b3",
+  "matplotlib": "3.6.3",
+  "max_time": 100000,
+  "model": "/home/sidd64/Sitar_Assignment_1/model.sitar",
+  "model_sha256": "74dc5f8b1e6ccccfc58b954a66a1e8bda3224ff242ddc82dcd0202a4b83ca970",
+  "numpy": "1.26.4",
+  "python": "3.12.3",
+  "run_id": "run_20261121_141027",
+  "scenarios": [
+    {
+      "description": "Balanced 40% load / 30% store baseline",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "40",
+        "P_STORE": "30",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "balanced",
+      "tags": [
+        "baseline",
+        "performance"
+      ]
+    },
+    {
+      "description": "Balanced workload with the legacy global RNG",
+      "env": {
+        "DET_RNG": "0",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "40",
+        "P_STORE": "30",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "global_rng",
+      "tags": [
+        "rng"
+      ]
+    },
+    {
+      "description": "Read-heavy 70% load / 10% store",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "70",
+        "P_STORE": "10",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "read_heavy",
+      "tags": [
+        "workload"
+      ]
+    },
+    {
+      "description": "Load-only 70% load / 0% store",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "70",
+        "P_STORE": "0",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "read_only",
+      "tags": [
+        "workload"
+      ]
+    },
+    {
+      "description": "Store-heavy 10% load / 80% store",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "10",
+        "P_STORE": "80",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "store_heavy",
+      "tags": [
+        "workload"
+      ]
+    },
+    {
+      "description": "Every instruction is a load",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "100",
+        "P_STORE": "0",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "load_extreme",
+      "tags": [
+        "workload",
+        "stress"
+      ]
+    },
+    {
+      "description": "Every instruction is a store",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "0",
+        "P_STORE": "100",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "store_extreme",
+      "tags": [
+        "workload",
+        "stress"
+      ]
+    },
+    {
+      "description": "Atomic-heavy 80% load / 80% store",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "80",
+        "P_STORE": "80",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "atomic_heavy",
+      "tags": [
+        "atomic",
+        "stress"
+      ]
+    },
+    {
+      "description": "Every instruction is an atomic",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "100",
+        "P_STORE": "100",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "atomic_extreme",
+      "tags": [
+        "atomic",
+        "stress"
+      ]
+    },
+    {
+      "description": "No load/store/atomic traffic",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "0",
+        "P_STORE": "0",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "no_data_ops",
+      "tags": [
+        "icache"
+      ]
+    },
+    {
+      "description": "Balanced workload with blocking caches",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "0",
+        "P_LOAD": "40",
+        "P_STORE": "30",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "balanced_blocking",
+      "tags": [
+        "blocking"
+      ]
+    },
+    {
+      "description": "Store-heavy high-temporal-locality ping-pong",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "35",
+        "P_STORE": "55",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.85",
+        "WRITE_POLICY": "0"
+      },
+      "id": "pingpong_t3a",
+      "tags": [
+        "coherence"
+      ]
+    },
+    {
+      "description": "Ping-pong with blocking caches",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "0",
+        "P_LOAD": "35",
+        "P_STORE": "55",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.85",
+        "WRITE_POLICY": "0"
+      },
+      "id": "pingpong_blocking",
+      "tags": [
+        "coherence",
+        "blocking"
+      ]
+    },
+    {
+      "description": "High temporal and spatial locality",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "40",
+        "P_STORE": "30",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.9",
+        "TEMPORAL_LOCALITY": "0.9",
+        "WRITE_POLICY": "0"
+      },
+      "id": "high_locality",
+      "tags": [
+        "locality"
+      ]
+    },
+    {
+      "description": "Low temporal and spatial locality (0.2)",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "40",
+        "P_STORE": "30",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.2",
+        "TEMPORAL_LOCALITY": "0.2",
+        "WRITE_POLICY": "0"
+      },
+      "id": "low_locality",
+      "tags": [
+        "locality"
+      ]
+    },
+    {
+      "description": "Fast memory (MEMORY_DELAY=5)",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "5",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "40",
+        "P_STORE": "30",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "fast_memory",
+      "tags": [
+        "memory"
+      ]
+    },
+    {
+      "description": "Slow memory (MEMORY_DELAY=80)",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "80",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "40",
+        "P_STORE": "30",
+        "REPL_POLICY": "1",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "slow_memory",
+      "tags": [
+        "memory"
+      ]
+    },
+    {
+      "description": "Random replacement policy",
+      "env": {
+        "DET_RNG": "1",
+        "MEMORY_DELAY": "40",
+        "NON_BLOCKING": "1",
+        "P_LOAD": "40",
+        "P_STORE": "30",
+        "REPL_POLICY": "0",
+        "SPATIAL_LOCALITY": "0.6",
+        "TEMPORAL_LOCALITY": "0.7",
+        "WRITE_POLICY": "0"
+      },
+      "id": "random_repl",
+      "tags": [
+        "cache-policy"
+      ]
+    }
+  ],
+  "sim_sha256": "975b654952f2e9226734b9a343b73999286ff2a55cefcc86283c6b7c8276a0f0",
+  "simulator": "/home/sidd64/Sitar_Assignment_1/sitar_sim",
+  "sitar": "/home/sidd64/Projects/sitar/scripts/sitar",
+  "timestamp": "2026-11-21T14:10:57"
+}

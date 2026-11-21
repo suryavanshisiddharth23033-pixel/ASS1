@@ -1,9 +1,0 @@
-/home/sidd64/Projects/sitar/scripts/../
-sitar_sim
-/home/sidd64/Projects/sitar/scripts/../compiler/sitar_default_main.cpp
-False
-True
-
-
-
-./Output

@@ -1,0 +1,3645 @@
+module Top
+    submodule IM : Memory<>
+    submodule DM : Memory<>
+    submodule DC : DualCore
+
+    net dc_im_req : capacity 1 width 22
+    net im_dc_resp : capacity 1 width 17
+
+    net dc_dm_req : capacity 1 width 22
+    net dm_dc_resp : capacity 1 width 17
+
+    DC.im_outp => dc_im_req
+    IM.inp <= dc_im_req
+    DC.im_inp <= im_dc_resp
+    IM.outp => im_dc_resp
+
+    DC.dm_outp => dc_dm_req
+    DM.inp <= dc_dm_req
+    DC.dm_inp <= dm_dc_resp
+    DM.outp => dm_dc_resp
+end module
+
+
+// Processor generates memory access patterns
+procedure Processor
+
+    parameter int P_LOAD = 40
+    parameter int P_STORE = 30
+    parameter int EXECUTION_DELAY = 3
+    parameter int TOTAL_INSTRUCTIONS = 1000
+    parameter int MAX_TIME = 100000
+    parameter int BLOCK_SIZE = 16
+    parameter int CORE_ID = 0
+
+    include $#include <cstdlib>$
+    include $#include <cstdint>$
+
+    decl $
+        enum MemOpType {
+            IFETCH = 0,
+            LOAD = 1,
+            STORE = 2,
+            ATOMICLOADSTORE = 3
+        };
+
+        enum MemSize {
+            WORD = 0,
+            DOUBLEWORD = 1,
+            QUADWORD = 2
+        };
+
+        int instr_count;
+
+        uint32_t requestAddr;
+        uint8_t requestType;
+        uint8_t requestSize;
+
+        uint8_t responseErr;
+        uint32_t responseData0;
+        uint32_t responseData1;
+        uint32_t responseData2;
+        uint32_t responseData3;
+
+        bool hasToken;
+        bool keepRunning;
+
+        bool do_load;
+        bool do_store;
+
+        int pLoad;
+        int pStore;
+
+        double TEMPORAL_LOCALITY;
+        double SPATIAL_LOCALITY;
+
+        static const uint32_t ADDR_SPACE = 1024;
+        static const int HISTORY_SIZE = 8;
+
+        uint32_t addrHistory[HISTORY_SIZE];
+
+        int histCount;
+        int histPos;
+
+        uint32_t prevAddr;
+        bool havePrev;
+
+        int coreId;
+
+        // Optional deterministic per-core RNG (DET_RNG=1). Default keeps the
+        // original global rand(); deterministic mode makes each core's
+        // address stream independent of bus-arbitration timing so variants
+        // can be compared on identical work.
+        uint32_t rngState;
+        bool detRng;
+
+        uint32_t rnd() {
+            if(detRng) {
+                rngState = rngState * 1664525u + 1013904223u;
+                return (rngState >> 8) & 0x00FFFFFFu;
+            }
+            return (uint32_t)rand();
+        }
+
+        // ICACHE interface pointers
+        bool *ic_req_valid;
+        bool *ic_resp_valid;
+
+        uint32_t *ic_req_addr;
+        uint8_t *ic_req_type;
+        uint8_t *ic_req_size;
+
+        uint8_t *ic_resp_err;
+
+        uint32_t *ic_resp_data0;
+        uint32_t *ic_resp_data1;
+        uint32_t *ic_resp_data2;
+        uint32_t *ic_resp_data3;
+
+        // DCACHE interface pointers
+        bool *dc_req_valid;
+        bool *dc_resp_valid;
+
+        uint32_t *dc_req_addr;
+        uint8_t *dc_req_type;
+        uint8_t *dc_req_size;
+
+        uint8_t *dc_resp_err;
+
+        uint32_t *dc_resp_data0;
+        uint32_t *dc_resp_data1;
+        uint32_t *dc_resp_data2;
+        uint32_t *dc_resp_data3;
+
+        // Coordinated stop
+        bool *my_done;
+        bool *peer_done;
+
+
+        double frand01() {
+            return (rnd() % 1000000) / 1000000.0;
+        }
+
+
+        uint32_t genAddress() {
+
+            uint32_t addr;
+
+            if(havePrev && frand01() < SPATIAL_LOCALITY) {
+
+                uint32_t blockStart =
+                    prevAddr & ~((uint32_t)BLOCK_SIZE - 1);
+
+                addr = blockStart +
+                    4 * (uint32_t)(rnd() % (BLOCK_SIZE / 4));
+
+            }
+            else if(histCount > 0 &&
+                    frand01() < TEMPORAL_LOCALITY) {
+
+                addr = addrHistory[rnd() % histCount];
+
+            }
+            else {
+
+                addr = 4 * (uint32_t)(rnd() % (ADDR_SPACE / 4));
+
+            }
+
+            addrHistory[histPos] = addr;
+
+            histPos = (histPos + 1) % HISTORY_SIZE;
+
+            if(histCount < HISTORY_SIZE)
+                histCount++;
+
+            prevAddr = addr;
+            havePrev = true;
+
+            return addr;
+        }
+
+
+        int getSizeBytes(int size) {
+
+            if(size == WORD) return 4;
+            if(size == DOUBLEWORD) return 8;
+
+            return 16;
+        }
+
+
+        uint32_t alignAddr(uint32_t addr, int size) {
+
+            if(size == WORD)
+                return addr & ~3u;
+
+            if(size == DOUBLEWORD)
+                return addr & ~7u;
+
+            return addr & ~15u;
+        }
+
+
+        void sendICacheRequest(
+            uint32_t addr,
+            uint8_t type,
+            uint8_t size
+        ) {
+
+            *ic_req_addr = addr;
+            *ic_req_type = type;
+            *ic_req_size = size;
+
+            *ic_resp_valid = false;
+
+            *ic_req_valid = true;
+        }
+
+
+        void sendDCacheRequest(
+            uint32_t addr,
+            uint8_t type,
+            uint8_t size
+        ) {
+
+            *dc_req_addr = addr;
+            *dc_req_type = type;
+            *dc_req_size = size;
+
+            *dc_resp_valid = false;
+
+            *dc_req_valid = true;
+        }
+
+
+        void printData(int size) {
+
+            int bytes = getSizeBytes(size);
+
+            uint32_t d[4] = {
+                responseData0,
+                responseData1,
+                responseData2,
+                responseData3
+            };
+
+            log << " data=";
+
+            for(int i = 0; i < bytes / 4; i++) {
+
+                log
+                    << ((d[i] >> 24) & 0xff) << " "
+                    << ((d[i] >> 16) & 0xff) << " "
+                    << ((d[i] >> 8) & 0xff) << " "
+                    << (d[i] & 0xff) << " ";
+
+            }
+        }
+
+    $
+
+
+    init $
+
+        instr_count = 0;
+
+        histCount = 0;
+        histPos = 0;
+
+        prevAddr = 0;
+        havePrev = false;
+
+        pLoad = P_LOAD;
+        pStore = P_STORE;
+
+        coreId = CORE_ID;
+
+        detRng = false;
+        if(const char* e = std::getenv("DET_RNG"))
+            detRng = (std::atoi(e) != 0);
+        rngState = 0x12345678u + (uint32_t)CORE_ID * 0x9E3779B9u;
+
+        TEMPORAL_LOCALITY = 0.7;
+        SPATIAL_LOCALITY = 0.6;
+
+        if(const char* e = std::getenv("TEMPORAL_LOCALITY"))
+            TEMPORAL_LOCALITY = std::atof(e);
+
+        if(const char* e = std::getenv("SPATIAL_LOCALITY"))
+            SPATIAL_LOCALITY = std::atof(e);
+
+        if(const char* e = std::getenv("P_LOAD"))
+            pLoad = std::atoi(e);
+
+        if(const char* e = std::getenv("P_STORE"))
+            pStore = std::atoi(e);
+
+    $
+
+
+    behavior
+
+        do
+
+            // Instruction fetch from icache
+            $
+
+                if(instr_count == 0) {
+
+                    log << endl
+                        << "CORE " << coreId
+                        << " LOCALITY temporal="
+                        << TEMPORAL_LOCALITY
+                        << " spatial="
+                        << SPATIAL_LOCALITY
+                        << " p_load="
+                        << pLoad
+                        << " p_store="
+                        << pStore;
+
+                }
+
+                requestType = IFETCH;
+                requestSize = WORD;
+
+                requestAddr =
+                    alignAddr(genAddress(), WORD);
+
+                log << endl
+                    << "[C" << coreId << "] IFETCH addr="
+                    << requestAddr;
+
+                sendICacheRequest(
+                    requestAddr,
+                    requestType,
+                    requestSize
+                );
+            $;
+
+
+            // Wait for icache response
+            do
+
+                $
+                    hasToken = *ic_resp_valid;
+                $;
+
+                if(not hasToken) then
+                    wait
+                end if;
+
+            while(not hasToken) end do;
+
+
+            // Consume icache response
+            $
+                responseErr = *ic_resp_err;
+
+                responseData0 = *ic_resp_data0;
+                responseData1 = *ic_resp_data1;
+                responseData2 = *ic_resp_data2;
+                responseData3 = *ic_resp_data3;
+
+                *ic_resp_valid = false;
+
+                if(responseErr != 0) {
+
+                    log << endl
+                        << "[C" << coreId << "] IFETCH ERROR="
+                        << (int)responseErr;
+
+                }
+                else {
+
+                    log << endl << "[C" << coreId << "] IFETCH OK";
+
+                    printData(WORD);
+
+                }
+            $;
+
+
+            // Execution delay
+            wait(EXECUTION_DELAY, 0);
+
+            $
+                do_load =
+                    (rnd() % 100) < pLoad;
+
+                do_store =
+                    (rnd() % 100) < pStore;
+            $;
+
+
+            // LOAD operation
+            if(do_load and not do_store) then
+
+                $
+                    requestType = LOAD;
+
+                    requestSize = rnd() % 3;
+
+                    requestAddr =
+                        alignAddr(
+                            genAddress(),
+                            requestSize
+                        );
+
+                    log << endl
+                        << "[C" << coreId << "] LOAD addr="
+                        << requestAddr
+                        << " size="
+                        << (int)requestSize;
+
+                    sendDCacheRequest(
+                        requestAddr,
+                        requestType,
+                        requestSize
+                    );
+                $;
+
+
+                do
+
+                    $
+                        hasToken = *dc_resp_valid;
+                    $;
+
+                    if(not hasToken) then
+                        wait
+                    end if;
+
+                while(not hasToken) end do;
+
+                $
+                    responseErr = *dc_resp_err;
+
+                    responseData0 = *dc_resp_data0;
+                    responseData1 = *dc_resp_data1;
+                    responseData2 = *dc_resp_data2;
+                    responseData3 = *dc_resp_data3;
+
+                    *dc_resp_valid = false;
+
+                    if(responseErr != 0) {
+
+                        log << endl
+                            << "[C" << coreId << "] LOAD ERROR="
+                            << (int)responseErr;
+
+                    }
+                    else {
+
+                        log << endl << "[C" << coreId << "] LOAD OK";
+
+                        printData(requestSize);
+
+                    }
+                $;
+
+            end if;
+
+
+            // STORE operation
+            if(do_store and not do_load) then
+
+                $
+                    requestType = STORE;
+
+                    requestSize = rnd() % 3;
+
+                    requestAddr =
+                        alignAddr(
+                            genAddress(),
+                            requestSize
+                        );
+
+                    log << endl
+                        << "[C" << coreId << "] STORE addr="
+                        << requestAddr
+                        << " size="
+                        << (int)requestSize;
+
+                    sendDCacheRequest(
+                        requestAddr,
+                        requestType,
+                        requestSize
+                    );
+                $;
+
+
+                do
+
+                    $
+                        hasToken = *dc_resp_valid;
+                    $;
+
+                    if(not hasToken) then
+                        wait
+                    end if;
+
+                while(not hasToken) end do;
+
+                $
+                    responseErr = *dc_resp_err;
+
+                    responseData0 = *dc_resp_data0;
+                    responseData1 = *dc_resp_data1;
+                    responseData2 = *dc_resp_data2;
+                    responseData3 = *dc_resp_data3;
+
+                    *dc_resp_valid = false;
+
+                    if(responseErr != 0) {
+
+                        log << endl
+                            << "[C" << coreId << "] STORE ERROR="
+                            << (int)responseErr;
+
+                    }
+                    else {
+
+                        log << endl << "[C" << coreId << "] STORE OK";
+
+                    }
+                $;
+
+            end if;
+
+
+            // ATOMIC operation
+            if(do_load and do_store) then
+
+                $
+                    requestType = ATOMICLOADSTORE;
+
+                    requestSize = WORD;
+
+                    requestAddr =
+                        alignAddr(
+                            genAddress(),
+                            requestSize
+                        );
+
+                    log << endl
+                        << "[C" << coreId << "] ATOMIC addr="
+                        << requestAddr
+                        << " size="
+                        << (int)requestSize;
+
+                    sendDCacheRequest(
+                        requestAddr,
+                        requestType,
+                        requestSize
+                    );
+                $;
+
+
+                do
+
+                    $
+                        hasToken = *dc_resp_valid;
+                    $;
+
+                    if(not hasToken) then
+                        wait
+                    end if;
+
+                while(not hasToken) end do;
+
+                $
+                    responseErr = *dc_resp_err;
+
+                    responseData0 = *dc_resp_data0;
+                    responseData1 = *dc_resp_data1;
+                    responseData2 = *dc_resp_data2;
+                    responseData3 = *dc_resp_data3;
+
+                    *dc_resp_valid = false;
+
+                    if(responseErr != 0) {
+
+                        log << endl
+                            << "[C" << coreId << "] ATOMIC ERROR="
+                            << (int)responseErr;
+
+                    }
+                    else {
+
+                        log << endl << "[C" << coreId << "] ATOMIC OK";
+
+                        printData(WORD);
+
+                    }
+                $;
+
+            end if;
+
+
+            // Instruction complete
+            $
+                instr_count++;
+
+                log << endl
+                    << "[C" << coreId << "] INSTRUCTION "
+                    << instr_count
+                    << " COMPLETE";
+
+                keepRunning =
+                    (instr_count < TOTAL_INSTRUCTIONS) &&
+                    (current_time.cycle() < MAX_TIME);
+            $;
+
+        while(keepRunning) end do;
+
+
+        // Request icache statistics
+        $
+            sendICacheRequest(
+                0xFFFFFFFF,
+                IFETCH,
+                WORD
+            );
+        $;
+
+        do
+
+            $
+                hasToken = *ic_resp_valid;
+            $;
+
+            if(not hasToken) then
+                wait
+            end if;
+
+        while(not hasToken) end do;
+
+        $
+            *ic_resp_valid = false;
+        $;
+
+
+        // Request dcache statistics
+        $
+            sendDCacheRequest(
+                0xFFFFFFFF,
+                IFETCH,
+                WORD
+            );
+        $;
+
+        do
+
+            $
+                hasToken = *dc_resp_valid;
+            $;
+
+            if(not hasToken) then
+                wait
+            end if;
+
+        while(not hasToken) end do;
+
+        $
+            *dc_resp_valid = false;
+
+            *my_done = true;
+
+            if(instr_count >= TOTAL_INSTRUCTIONS) {
+
+                log << endl
+                    << "[C" << coreId << "] Completed "
+                    << TOTAL_INSTRUCTIONS
+                    << " instructions";
+
+            }
+            else {
+
+                log << endl
+                    << "[C" << coreId << "] TIME LIMIT EXCEEDED at cycle "
+                    << current_time.cycle();
+
+            }
+
+            log << endl
+                << "[C" << coreId << "] RESULT instructions="
+                << instr_count
+                << " cycles="
+                << current_time.cycle();
+
+            if(!(*peer_done)) {
+                log << endl
+                    << "[C" << coreId << "] Waiting for peer core...";
+            }
+        $;
+
+
+        // Wait for peer to finish
+        do
+
+            $
+                hasToken = *peer_done;
+            $;
+
+            if(not hasToken) then
+                wait
+            end if;
+
+        while(not hasToken) end do;
+
+
+        $
+            log << endl
+                << "[C" << coreId << "] Both cores done. Stopping simulation at cycle "
+                << current_time.cycle();
+        $;
+
+        stop simulation;
+
+    end behavior
+
+end procedure
+
+
+
+// =====================================================================
+// Set-associative cache with MSI coherence support.
+// When IS_DCACHE=0: instruction cache, direct memory access (to IM).
+// When IS_DCACHE=1: data cache, bus-based access (through CoherenceBus).
+// =====================================================================
+procedure Cache
+
+    parameter int NUM_SETS = 4
+    parameter int NUM_WAYS = 4
+    parameter int BLOCK_SIZE = 16
+    parameter int CACHE_DELAY = 4
+    parameter int REPL_POLICY = 1
+    parameter int WRITE_POLICY = 0
+    parameter int CORE_ID = 0
+    parameter int IS_DCACHE = 0
+
+    include $#include <cstdlib>$
+    include $#include <vector>$
+    include $#include <cstdint>$
+    include $#include <cmath>$
+
+    decl $
+
+        enum MemOpType {
+            IFETCH = 0,
+            LOAD = 1,
+            STORE = 2,
+            ATOMICLOADSTORE = 3
+        };
+
+        enum MemSize {
+            WORD = 0,
+            DOUBLEWORD = 1,
+            QUADWORD = 2
+        };
+
+        enum CacheStatus {
+            MISS = -1,
+            HIT = 1
+        };
+
+        enum ReplacementPolicy {
+            REPL_RANDOM = 0,
+            REPL_LRU    = 1,
+            REPL_FIFO   = 2,
+            REPL_LFU    = 3
+        };
+
+        enum WritePolicy {
+            WB_WRITE_ALLOCATE    = 0,
+            WT_WRITE_ALLOCATE    = 1,
+            WT_NO_WRITE_ALLOCATE = 2
+        };
+
+        enum CoherenceState {
+            INVALID  = 0,
+            SHARED   = 1,
+            MODIFIED = 2
+        };
+
+        enum BusCmd {
+            BUS_NONE   = 0,
+            BUS_RD     = 1,
+            BUS_RDX    = 2,
+            BUS_UPGR   = 3,
+            BUS_WB     = 4,
+            BUS_ATOMIC = 5
+        };
+
+        class CacheLine {
+
+            public:
+
+                CoherenceState state;
+                uint32_t tagBit;
+                long lastAccessCycle;
+                long insertionCycle;
+                long accessCount;
+                std::vector<uint8_t> data;
+
+                CacheLine() {
+                    state = INVALID;
+                    tagBit = 0;
+                    lastAccessCycle = 0;
+                    insertionCycle = 0;
+                    accessCount = 0;
+                    data.resize(BLOCK_SIZE, 0);
+                }
+
+                bool isValid() const { return state != INVALID; }
+                bool isDirty() const { return state == MODIFIED; }
+        };
+
+
+        // cache[set][way]
+        std::vector<std::vector<CacheLine>> cache;
+
+
+        // Processor interface
+        bool req_valid;
+        bool resp_valid;
+
+        uint32_t req_addr;
+        uint8_t req_type;
+        uint8_t req_size;
+
+        uint8_t resp_err;
+
+        uint32_t resp_data0;
+        uint32_t resp_data1;
+        uint32_t resp_data2;
+        uint32_t resp_data3;
+
+
+        // Memory interface (used by IS_DCACHE=0, i.e., ICache)
+        token<22> requestToMemory;
+        token<17> responseFromMemory;
+
+        uint32_t requestAddr;
+        uint8_t requestType;
+        uint8_t requestSize;
+
+        uint8_t responseErr;
+
+        uint32_t responseData0;
+        uint32_t responseData1;
+        uint32_t responseData2;
+        uint32_t responseData3;
+
+        // Saved response data: captured before the CACHE_DELAY wait to
+        // prevent snoop operations (called by the bus while this cache is
+        // waiting) from overwriting responseData0..3.
+        uint32_t savedResponseErr;
+        uint32_t savedResponseData0;
+        uint32_t savedResponseData1;
+        uint32_t savedResponseData2;
+        uint32_t savedResponseData3;
+
+
+        int cacheStatus;
+        bool hasToken;
+        bool ok;
+        bool pulled;
+        bool isStatRequest;
+
+
+        // WRITE-BACK BUFFER (shared with WbEngine)
+        bool wbPending;
+        uint32_t wbBlockAddr;
+        uint8_t wbSize;
+        uint32_t wbData0;
+        uint32_t wbData1;
+        uint32_t wbData2;
+        uint32_t wbData3;
+        bool memBusy;
+        bool feWaiting;
+        long statWbDone;
+        long statWbWaitTotal;
+        long statWbWaitMax;
+
+        int nonBlocking;
+
+        int replPolicy;
+        int writePolicy;
+        int coreId;
+        int isDcache;
+
+        // Front-end temporaries
+        uint32_t wb_setIdx;
+        int wb_victimWay;
+        bool wb_needWriteback;
+        uint32_t wb_victimAddr;
+        uint32_t missBlockAddr;
+        bool conflict;
+        bool bufBusy;
+        bool gotMem;
+        bool stallLogged;
+        bool noAllocStore;
+        bool wtNeeded;
+        uint32_t wtStoreAddr;
+        uint8_t wtStoreSize;
+
+        // Coherence bus channels (used by IS_DCACHE=1)
+        bool bus_req_valid;
+        bool bus_resp_valid;
+        uint8_t bus_req_cmd;
+        uint32_t bus_req_addr;
+        uint8_t bus_req_size;
+        uint32_t bus_req_d0;
+        uint32_t bus_req_d1;
+        uint32_t bus_req_d2;
+        uint32_t bus_req_d3;
+        uint8_t bus_resp_err;
+        uint32_t bus_resp_d0;
+        uint32_t bus_resp_d1;
+        uint32_t bus_resp_d2;
+        uint32_t bus_resp_d3;
+
+        // WB engine bus channels
+        bool wb_bus_req_valid;
+        bool wb_bus_resp_valid;
+        uint32_t wb_bus_addr;
+        uint8_t wb_bus_size;
+        uint32_t wb_bus_d0;
+        uint32_t wb_bus_d1;
+        uint32_t wb_bus_d2;
+        uint32_t wb_bus_d3;
+        uint8_t wb_bus_err;
+
+        // Coherence stats
+        long statBusRd;
+        long statBusRdx;
+        long statBusUpgr;
+        long statInvalidationsRx;
+        long statDirtyInterventions;
+        long statDowngrades;
+        long statBusWaitCycles;
+
+        // Statistics
+        long statTotal;
+        long statHits;
+        long statMisses;
+        long statWritebacks;
+        long statWriteThroughs;
+        long statHitsUnderWB;
+        long statConflictStall;
+        long statBufferStall;
+        long statMemWait;
+
+        int hitState;
+        bool upgradeNeeded;
+        bool busDone;
+
+
+        int getSizeBytes(int size) {
+            if(size == WORD) return 4;
+            if(size == DOUBLEWORD) return 8;
+            return 16;
+        }
+
+        uint8_t block_size_code() {
+            if(BLOCK_SIZE == 4) return WORD;
+            if(BLOCK_SIZE == 8) return DOUBLEWORD;
+            return QUADWORD;
+        }
+
+        bool isAligned(uint32_t addr, int size) {
+            if(size == WORD) return (addr & 3) == 0;
+            if(size == DOUBLEWORD) return (addr & 7) == 0;
+            return (addr & 15) == 0;
+        }
+
+        uint32_t get_tag(uint32_t addr) {
+            return addr / (BLOCK_SIZE * NUM_SETS);
+        }
+
+        uint32_t get_set_index(uint32_t addr) {
+            return (addr / BLOCK_SIZE) % NUM_SETS;
+        }
+
+        uint32_t get_offset(uint32_t addr) {
+            return addr % BLOCK_SIZE;
+        }
+
+        int find_way(uint32_t tag, uint32_t setIdx) {
+            for(int way = 0; way < NUM_WAYS; way++) {
+                if(cache[setIdx][way].isValid() &&
+                   cache[setIdx][way].tagBit == tag) {
+                    return way;
+                }
+            }
+            return -1;
+        }
+
+
+        // Return the coherence state of the block at blockAddr if present,
+        // or -1 if the block is not cached in this cache.
+        int line_state(uint32_t blockAddr) {
+            uint32_t tag = get_tag(blockAddr);
+            uint32_t setIdx = get_set_index(blockAddr);
+            int way = find_way(tag, setIdx);
+            if(way < 0) return -1;
+            return (int)cache[setIdx][way].state;
+        }
+
+
+        bool handle_snoop(
+            uint8_t cmd,
+            uint32_t blockAddr,
+            bool &suppliedDirty,
+            uint32_t &dirtyD0,
+            uint32_t &dirtyD1,
+            uint32_t &dirtyD2,
+            uint32_t &dirtyD3
+        ) {
+            uint32_t tag = get_tag(blockAddr);
+            uint32_t setIdx = get_set_index(blockAddr);
+            int way = find_way(tag, setIdx);
+
+            bool hitWbBuf = wbPending &&
+                            ((wbBlockAddr & ~((uint32_t)BLOCK_SIZE - 1)) == blockAddr) &&
+                            (wbSize == block_size_code());
+
+            if(hitWbBuf && way < 0) {
+                suppliedDirty = true;
+                dirtyD0 = wbData0;
+                dirtyD1 = wbData1;
+                dirtyD2 = wbData2;
+                dirtyD3 = wbData3;
+
+                // If the write engine has already submitted this buffer to
+                // the bus, cancel that queued request and acknowledge the
+                // cancellation. Keep wbPending set until WbEngine consumes
+                // the acknowledgement so the one-entry buffer cannot be
+                // reused underneath the in-flight handshake.
+                if(wb_bus_req_valid && !wb_bus_resp_valid) {
+                    wb_bus_req_valid = false;
+                    wb_bus_err = 3; // snoop supplied the data; no memory WB needed
+                    wb_bus_resp_valid = true;
+                }
+                else if(!wb_bus_resp_valid) {
+                    // No write request is outstanding, so the buffer can be
+                    // released immediately after supplying its dirty data.
+                    wbPending = false;
+                    statWbDone++;
+                }
+
+                if(cmd == BUS_RD) {
+                    statDirtyInterventions++;
+                    statDowngrades++;
+                }
+                else if(cmd == BUS_RDX || cmd == BUS_ATOMIC) {
+                    statDirtyInterventions++;
+                    statInvalidationsRx++;
+                }
+                return true;
+            }
+
+            if(way >= 0) {
+                CoherenceState lineState = cache[setIdx][way].state;
+
+                switch(cmd) {
+                    case BUS_RD:
+                        if(lineState == MODIFIED) {
+                            suppliedDirty = true;
+                            read_block_for_writeback(setIdx, way);
+                            dirtyD0 = responseData0;
+                            dirtyD1 = responseData1;
+                            dirtyD2 = responseData2;
+                            dirtyD3 = responseData3;
+                            cache[setIdx][way].state = SHARED;
+                            statDirtyInterventions++;
+                            statDowngrades++;
+                        }
+                        else {
+                            suppliedDirty = false;
+                        }
+                        return true;
+
+                    case BUS_RDX:
+                        if(lineState == MODIFIED) {
+                            suppliedDirty = true;
+                            read_block_for_writeback(setIdx, way);
+                            dirtyD0 = responseData0;
+                            dirtyD1 = responseData1;
+                            dirtyD2 = responseData2;
+                            dirtyD3 = responseData3;
+                            cache[setIdx][way].state = INVALID;
+                            statDirtyInterventions++;
+                            statInvalidationsRx++;
+                        }
+                        else if(lineState == SHARED) {
+                            suppliedDirty = false;
+                            cache[setIdx][way].state = INVALID;
+                            statInvalidationsRx++;
+                        }
+                        return true;
+
+                    case BUS_UPGR:
+                        if(lineState == SHARED) {
+                            suppliedDirty = false;
+                            cache[setIdx][way].state = INVALID;
+                            statInvalidationsRx++;
+                        }
+                        return true;
+
+                    case BUS_ATOMIC:
+                        if(lineState == MODIFIED) {
+                            suppliedDirty = true;
+                            read_block_for_writeback(setIdx, way);
+                            dirtyD0 = responseData0;
+                            dirtyD1 = responseData1;
+                            dirtyD2 = responseData2;
+                            dirtyD3 = responseData3;
+                            cache[setIdx][way].state = INVALID;
+                            statDirtyInterventions++;
+                            statInvalidationsRx++;
+                        }
+                        else if(lineState == SHARED) {
+                            suppliedDirty = false;
+                            cache[setIdx][way].state = INVALID;
+                            statInvalidationsRx++;
+                        }
+                        return true;
+
+                    default:
+                        return false;
+                }
+            }
+
+            suppliedDirty = false;
+            return false;
+        }
+
+
+        // Release this cache's own copy of the block before a BUS_ATOMIC is
+        // executed by the bus. If the line is MODIFIED, return its dirty
+        // content so the bus can flush it to DM before the atomic RMW.
+        // In all cases the line ends INVALID so no stale copy survives.
+        bool release_for_atomic(
+            uint32_t blockAddr,
+            uint32_t &d0,
+            uint32_t &d1,
+            uint32_t &d2,
+            uint32_t &d3
+        ) {
+            uint32_t tag = get_tag(blockAddr);
+            uint32_t setIdx = get_set_index(blockAddr);
+            int way = find_way(tag, setIdx);
+            d0 = 0; d1 = 0; d2 = 0; d3 = 0;
+            if(way < 0) return false;
+
+            CoherenceState lineState = cache[setIdx][way].state;
+            bool wasModified = (lineState == MODIFIED);
+            if(wasModified) {
+                for(int i = 0; i < BLOCK_SIZE / 4; i++) {
+                    int k = i * 4;
+                    uint32_t w =
+                        ((uint32_t)cache[setIdx][way].data[k] << 24) |
+                        ((uint32_t)cache[setIdx][way].data[k+1] << 16) |
+                        ((uint32_t)cache[setIdx][way].data[k+2] << 8) |
+                        ((uint32_t)cache[setIdx][way].data[k+3]);
+                    if(i == 0) d0 = w;
+                    else if(i == 1) d1 = w;
+                    else if(i == 2) d2 = w;
+                    else d3 = w;
+                }
+            }
+            cache[setIdx][way].state = INVALID;
+            return wasModified;
+        }
+
+
+        int read_cache(uint32_t addr, int size, int touch, long now, int &hitStateOut) {
+
+            responseData0 = 0;
+            responseData1 = 0;
+            responseData2 = 0;
+            responseData3 = 0;
+            hitStateOut = INVALID;
+
+            uint32_t tag = get_tag(addr);
+            uint32_t setIdx = get_set_index(addr);
+            uint32_t offset = get_offset(addr);
+
+            int bytes = getSizeBytes(size);
+
+            if(offset + bytes > BLOCK_SIZE)
+                return MISS;
+
+            for(int way = 0; way < NUM_WAYS; way++) {
+
+                if(cache[setIdx][way].isValid() &&
+                   cache[setIdx][way].tagBit == tag) {
+
+                    uint32_t d[4] = {0, 0, 0, 0};
+
+                    for(int j = 0; j < bytes / 4; j++) {
+                        int k = offset + j * 4;
+                        d[j] =
+                            ((uint32_t)cache[setIdx][way].data[k] << 24) |
+                            ((uint32_t)cache[setIdx][way].data[k+1] << 16) |
+                            ((uint32_t)cache[setIdx][way].data[k+2] << 8) |
+                            ((uint32_t)cache[setIdx][way].data[k+3]);
+                    }
+
+                    responseData0 = d[0];
+                    responseData1 = d[1];
+                    responseData2 = d[2];
+                    responseData3 = d[3];
+
+                    hitStateOut = cache[setIdx][way].state;
+
+                    if(touch) {
+                        cache[setIdx][way].lastAccessCycle = now;
+                        cache[setIdx][way].accessCount++;
+                    }
+
+                    return HIT;
+                }
+            }
+
+            return MISS;
+        }
+
+
+        void set_store_data() {
+            uint32_t marker = (coreId == 0) ? 0xAAAA0000u : 0xBBBB0000u;
+            responseData0 = marker | (statTotal & 0xFFFF);
+            responseData1 = marker | (statTotal & 0xFFFF);
+            responseData2 = marker | (statTotal & 0xFFFF);
+            responseData3 = marker | (statTotal & 0xFFFF);
+        }
+
+
+        void write_data_to_cache(uint32_t addr, int size) {
+
+            uint32_t setIdx = get_set_index(addr);
+            uint32_t offset = get_offset(addr);
+
+            int bytes = getSizeBytes(size);
+
+            uint32_t d[4] = {
+                responseData0,
+                responseData1,
+                responseData2,
+                responseData3
+            };
+
+            int way = find_way(get_tag(addr), setIdx);
+            if(way < 0) return;
+
+            for(int i = 0; i < bytes / 4; i++) {
+                int k = offset + i * 4;
+                cache[setIdx][way].data[k] = (d[i] >> 24) & 0xff;
+                cache[setIdx][way].data[k+1] = (d[i] >> 16) & 0xff;
+                cache[setIdx][way].data[k+2] = (d[i] >> 8) & 0xff;
+                cache[setIdx][way].data[k+3] = d[i] & 0xff;
+            }
+
+            if(writePolicy == WB_WRITE_ALLOCATE) {
+                cache[setIdx][way].state = MODIFIED;
+            }
+            else if(cache[setIdx][way].state == INVALID) {
+                cache[setIdx][way].state = SHARED;
+            }
+        }
+
+
+        void read_block_for_writeback(uint32_t setIdx, int way) {
+
+            uint32_t d[4] = {0, 0, 0, 0};
+
+            for(int i = 0; i < BLOCK_SIZE / 4; i++) {
+                int k = i * 4;
+                d[i] =
+                    ((uint32_t)cache[setIdx][way].data[k] << 24) |
+                    ((uint32_t)cache[setIdx][way].data[k+1] << 16) |
+                    ((uint32_t)cache[setIdx][way].data[k+2] << 8) |
+                    ((uint32_t)cache[setIdx][way].data[k+3]);
+            }
+
+            responseData0 = d[0];
+            responseData1 = d[1];
+            responseData2 = d[2];
+            responseData3 = d[3];
+        }
+
+
+        uint32_t get_block_addr_from_tag_set(uint32_t tag, uint32_t setIdx) {
+            return (tag * NUM_SETS + setIdx) * BLOCK_SIZE;
+        }
+
+
+        int select_victim_way(uint32_t setIdx) {
+
+            for(int way = 0; way < NUM_WAYS; way++) {
+                if(!cache[setIdx][way].isValid()) {
+                    return way;
+                }
+            }
+
+            if(replPolicy == REPL_RANDOM) return rand() % NUM_WAYS;
+
+            int victim = 0;
+
+            if(replPolicy == REPL_LRU) {
+                for(int way = 1; way < NUM_WAYS; way++) {
+                    if(cache[setIdx][way].lastAccessCycle <
+                       cache[setIdx][victim].lastAccessCycle) {
+                        victim = way;
+                    }
+                }
+                return victim;
+            }
+
+            if(replPolicy == REPL_FIFO) {
+                for(int way = 1; way < NUM_WAYS; way++) {
+                    if(cache[setIdx][way].insertionCycle <
+                       cache[setIdx][victim].insertionCycle) {
+                        victim = way;
+                    }
+                }
+                return victim;
+            }
+
+            for(int way = 1; way < NUM_WAYS; way++) {
+                if(cache[setIdx][way].accessCount <
+                   cache[setIdx][victim].accessCount ||
+                   (cache[setIdx][way].accessCount ==
+                    cache[setIdx][victim].accessCount &&
+                    cache[setIdx][way].lastAccessCycle <
+                    cache[setIdx][victim].lastAccessCycle)) {
+                    victim = way;
+                }
+            }
+            return victim;
+        }
+
+
+        void write_cache(uint32_t addr, int replaceWay, long now) {
+
+            uint32_t tag = get_tag(addr);
+            uint32_t setIdx = get_set_index(addr);
+
+            uint32_t d[4] = {
+                responseData0,
+                responseData1,
+                responseData2,
+                responseData3
+            };
+
+            for(int i = 0; i < BLOCK_SIZE; i++) {
+                int word = i / 4;
+                int byte = i % 4;
+                cache[setIdx][replaceWay].data[i] =
+                    (d[word] >> (24 - byte * 8)) & 0xff;
+            }
+
+            cache[setIdx][replaceWay].tagBit = tag;
+            cache[setIdx][replaceWay].state = SHARED;
+            cache[setIdx][replaceWay].insertionCycle = now;
+            cache[setIdx][replaceWay].lastAccessCycle = now;
+            cache[setIdx][replaceWay].accessCount = 1;
+        }
+
+
+        void prepareMemoryRequest(
+            uint32_t addr, uint8_t type, uint8_t size,
+            uint32_t d0, uint32_t d1, uint32_t d2, uint32_t d3
+        ) {
+            sitar::pack(requestToMemory, addr, type, size, d0, d1, d2, d3);
+        }
+
+
+        inport<17>* m_inp;
+        outport<22>* m_outp;
+    $
+
+    init $
+
+        cache.resize(NUM_SETS);
+        for(int i = 0; i < NUM_SETS; i++) {
+            cache[i].resize(NUM_WAYS);
+        }
+
+        req_valid = false;
+        resp_valid = false;
+        req_addr = 0;
+        req_type = 0;
+        req_size = 0;
+        resp_err = 0;
+        resp_data0 = 0;
+        resp_data1 = 0;
+        resp_data2 = 0;
+        resp_data3 = 0;
+
+        wbPending = false;
+        wbBlockAddr = 0;
+        wbSize = 0;
+        wbData0 = 0;
+        wbData1 = 0;
+        wbData2 = 0;
+        wbData3 = 0;
+        memBusy = false;
+        feWaiting = false;
+        statWbDone = 0;
+        statWbWaitTotal = 0;
+        statWbWaitMax = 0;
+
+        nonBlocking = 1;
+        if(const char* e = std::getenv("NON_BLOCKING"))
+            nonBlocking = std::atoi(e);
+
+        replPolicy = REPL_POLICY;
+        if(const char* e = std::getenv("REPL_POLICY"))
+            replPolicy = std::atoi(e);
+
+        writePolicy = WRITE_POLICY;
+        if(const char* e = std::getenv("WRITE_POLICY"))
+            writePolicy = std::atoi(e);
+
+        coreId = CORE_ID;
+        isDcache = IS_DCACHE;
+
+        bus_req_valid = false;
+        bus_resp_valid = false;
+        bus_req_cmd = 0;
+        bus_req_addr = 0;
+        bus_req_size = 0;
+        bus_req_d0 = 0;
+        bus_req_d1 = 0;
+        bus_req_d2 = 0;
+        bus_req_d3 = 0;
+        bus_resp_err = 0;
+        bus_resp_d0 = 0;
+        bus_resp_d1 = 0;
+        bus_resp_d2 = 0;
+        bus_resp_d3 = 0;
+
+        wb_bus_req_valid = false;
+        wb_bus_resp_valid = false;
+        wb_bus_addr = 0;
+        wb_bus_size = 0;
+        wb_bus_d0 = 0;
+        wb_bus_d1 = 0;
+        wb_bus_d2 = 0;
+        wb_bus_d3 = 0;
+        wb_bus_err = 0;
+
+        statBusRd = 0;
+        statBusRdx = 0;
+        statBusUpgr = 0;
+        statInvalidationsRx = 0;
+        statDirtyInterventions = 0;
+        statDowngrades = 0;
+        statBusWaitCycles = 0;
+
+        statTotal = 0;
+        statHits = 0;
+        statMisses = 0;
+        statWritebacks = 0;
+        statWriteThroughs = 0;
+        statHitsUnderWB = 0;
+        statConflictStall = 0;
+        statBufferStall = 0;
+        statMemWait = 0;
+
+    $
+
+
+    behavior
+
+        do
+
+            // Wait for processor request
+            do
+                $
+                    hasToken = req_valid;
+                $;
+                if(not hasToken) then
+                    wait
+                end if;
+            while(not hasToken) end do;
+
+            $
+                requestAddr = req_addr;
+                requestType = req_type;
+                requestSize = req_size;
+                req_valid = false;
+                responseErr = 0;
+                responseData0 = 0;
+                responseData1 = 0;
+                responseData2 = 0;
+                responseData3 = 0;
+                isStatRequest = (requestAddr == 0xFFFFFFFF);
+            $;
+
+            if(isStatRequest) then
+
+                $
+                    log << endl
+                        << "[C" << coreId << "]"
+                        << (isDcache ? " DCACHE" : " ICACHE")
+                        << " STATISTICS"
+                        << " (config: sets=" << NUM_SETS
+                        << " ways=" << NUM_WAYS
+                        << " blockSize=" << BLOCK_SIZE
+                        << " nonBlocking=" << nonBlocking
+                        << " repl=" << replPolicy
+                        << " write=" << writePolicy << ")";
+
+                    log << endl
+                        << "requests=" << statTotal
+                        << " hits=" << statHits
+                        << " misses=" << statMisses
+                        << " writebacks=" << statWritebacks
+                        << " writethroughs=" << statWriteThroughs
+                        << " writebacks_done=" << statWbDone;
+
+                    log << endl
+                        << "hits_under_wb=" << statHitsUnderWB
+                        << " conflict_stall_cycles=" << statConflictStall
+                        << " buffer_stall_cycles=" << statBufferStall
+                        << " mem_wait_cycles=" << statMemWait
+                        << " bus_wait_cycles=" << statBusWaitCycles
+                        << " wb_wait_total=" << statWbWaitTotal
+                        << " wb_wait_max=" << statWbWaitMax;
+
+                    if(isDcache) {
+                        log << endl
+                            << "bus_rd=" << statBusRd
+                            << " bus_rdx=" << statBusRdx
+                            << " bus_upgr=" << statBusUpgr
+                            << " invalidations_rx=" << statInvalidationsRx
+                            << " dirty_interventions=" << statDirtyInterventions
+                            << " downgrades=" << statDowngrades;
+
+                        long endM = 0, endS = 0, endI = 0;
+                        for(int s = 0; s < NUM_SETS; s++) {
+                            for(int w = 0; w < NUM_WAYS; w++) {
+                                if(cache[s][w].state == MODIFIED) endM++;
+                                else if(cache[s][w].state == SHARED) endS++;
+                                else endI++;
+                            }
+                        }
+                        log << endl
+                            << "final_state: M=" << endM
+                            << " S=" << endS
+                            << " I=" << endI;
+                    }
+
+                    log << endl
+                        << "p_hit="
+                        << (statTotal > 0 ? (double)statHits / statTotal : 0.0);
+                $;
+
+            else
+
+                if(not isAligned(requestAddr, requestSize)) then
+                    $
+                        responseErr = 2;
+                        log << endl << "CACHE ALIGNMENT ERROR " << requestAddr;
+                    $;
+
+                else
+
+                    if(requestType == ATOMICLOADSTORE) then
+
+                        // ATOMIC: read-modify-write.
+                        //
+                        // For the instruction cache the operation bypasses the
+                        // cache and goes straight to private IM (read-only,
+                        // no coherence hazard).
+                        //
+                        // For the data cache the operation is coherent: the
+                        // request is forwarded to the CoherenceBus as
+                        // BUS_ATOMIC. The bus serializes the atomic against
+                        // all other bus traffic, flushes any dirty copies of
+                        // the block held by either cache to DM, invalidates
+                        // both copies, executes the RMW on DM, and returns
+                        // the pre-atomic value to the requester.
+                        $
+                            statTotal++;
+                            statMisses++;
+                            missBlockAddr = requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
+                            stallLogged = false;
+                            log << endl << "[C" << coreId << "] CACHE ATOMIC"
+                                << " addr=" << requestAddr
+                                << " size=" << (int)requestSize
+                                << " cycle=" << current_time.cycle();
+                        $;
+
+                        if(isDcache == 0) then
+
+                            // ICache: bus-mediated (coherent, shared IM)
+                            $
+                                bus_req_cmd = BUS_RD;
+                                bus_req_addr = requestAddr;
+                                bus_req_size = requestSize;
+                                bus_req_valid = true;
+
+                                log << endl
+                                    << "[C" << coreId << "] BUS_REQ cmd="
+                                    << (int)bus_req_cmd << " addr=" << bus_req_addr
+                                    << " cycle=" << current_time.cycle();
+                            $;
+
+                            do
+                                $
+                                    busDone = bus_resp_valid;
+                                    if(!busDone) statBusWaitCycles++;
+                                $;
+                                if(not busDone) then wait end if;
+                            while(not busDone) end do;
+
+                            $
+                                bus_resp_valid = false;
+                                bus_req_valid = false;
+                                responseErr = bus_resp_err;
+                                responseData0 = bus_resp_d0;
+                                responseData1 = bus_resp_d1;
+                                responseData2 = bus_resp_d2;
+                                responseData3 = bus_resp_d3;
+                            $;
+
+                        else
+
+                            // DCache: coherent bus-mediated atomic.
+                            //
+                            // Wait for any parked write-back of the same
+                            // block to drain first, otherwise the atomic's
+                            // result could be clobbered by a late write-back.
+                            do
+                                $
+                                    conflict = wbPending &&
+                                        ((wbBlockAddr & ~((uint32_t)BLOCK_SIZE - 1)) == missBlockAddr);
+                                    if(conflict) statConflictStall++;
+                                $;
+                                if(conflict) then wait end if;
+                            while(conflict) end do;
+
+                            $
+                                bus_req_cmd = BUS_ATOMIC;
+                                // Atomic operates on the exact word address;
+                                // the bus masks to the block address for the
+                                // snoop phase.
+                                bus_req_addr = requestAddr;
+                                bus_req_size = requestSize;
+                                bus_req_valid = true;
+
+                                log << endl
+                                    << "[C" << coreId << "] BUS_REQ cmd="
+                                    << (int)bus_req_cmd << " addr=" << bus_req_addr
+                                    << " cycle=" << current_time.cycle();
+                            $;
+
+                            do
+                                $
+                                    busDone = bus_resp_valid;
+                                    if(!busDone) statBusWaitCycles++;
+                                $;
+                                if(not busDone) then wait end if;
+                            while(not busDone) end do;
+
+                            $
+                                bus_resp_valid = false;
+                                bus_req_valid = false;
+                                responseErr = bus_resp_err;
+                                responseData0 = bus_resp_d0;
+                                responseData1 = bus_resp_d1;
+                                responseData2 = bus_resp_d2;
+                                responseData3 = bus_resp_d3;
+                            $;
+
+                        end if;
+
+                    else
+
+                        // IFETCH / LOAD / STORE
+                        $
+                            cacheStatus = read_cache(requestAddr, requestSize, 1,
+                                current_time.cycle(), hitState);
+                        $;
+
+                        if(cacheStatus == HIT) then
+
+                            $
+                                statTotal++;
+                                statHits++;
+                                wtNeeded = false;
+                                upgradeNeeded = false;
+
+                                if(requestType == STORE) {
+
+                                    if(hitState == SHARED && isDcache) {
+                                        // Need coherence upgrade: S -> M
+                                        upgradeNeeded = true;
+                                    }
+                                    else {
+                                        set_store_data();
+                                        write_data_to_cache(requestAddr, requestSize);
+
+                                        if(writePolicy != WB_WRITE_ALLOCATE) {
+                                            wtNeeded = true;
+                                            wtStoreAddr = requestAddr;
+                                            wtStoreSize = requestSize;
+                                        }
+                                    }
+                                }
+
+                                if(wbPending) {
+                                    statHitsUnderWB++;
+                                }
+                            $;
+
+                            // Coherence upgrade: S -> M via BUS_UPGR
+                            if(upgradeNeeded) then
+
+                                $
+                                    statBusUpgr++;
+                                    statBusWaitCycles++;
+                                    bus_req_cmd = BUS_UPGR;
+                                    bus_req_addr = requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
+                                    bus_req_valid = true;
+
+                                    log << endl
+                                        << "[C" << coreId << "] BUS_UPGR addr="
+                                        << bus_req_addr;
+                                $;
+
+                                do
+                                    $
+                                        busDone = bus_resp_valid;
+                                        if(!busDone) statBusWaitCycles++;
+                                    $;
+                                    if(not busDone) then wait end if;
+                                while(not busDone) end do;
+
+                                $
+                                    bus_resp_valid = false;
+                                    bus_req_valid = false;
+
+                                    // Re-check: peer may have invalidated us while we waited
+                                    int recheckWay = find_way(get_tag(requestAddr),
+                                        get_set_index(requestAddr));
+
+                                    if(recheckWay >= 0 &&
+                                       cache[get_set_index(requestAddr)][recheckWay].state != INVALID) {
+                                        // Still valid, upgrade to MODIFIED
+                                        set_store_data();
+                                        write_data_to_cache(requestAddr, requestSize);
+                                        cache[get_set_index(requestAddr)][recheckWay].state = MODIFIED;
+                                    }
+                                    else {
+                                        // The initial shared hit no longer
+                                        // exists. Count the completed access
+                                        // as a miss and recover with RDX so a
+                                        // modified peer supplies its dirty data.
+                                        statHits--;
+                                        statMisses++;
+                                        cacheStatus = MISS;
+
+                                        // The front end is blocked on this
+                                        // request, so the invalidated victim
+                                        // cannot be replaced locally while the
+                                        // UPGR is outstanding. An invalid way
+                                        // is therefore available for the fill.
+                                        wb_setIdx = get_set_index(requestAddr);
+                                        wb_victimWay = select_victim_way(wb_setIdx);
+
+                                        statBusRdx++;
+                                        bus_req_cmd = BUS_RDX;
+                                        bus_req_addr = requestAddr &
+                                            ~((uint32_t)BLOCK_SIZE - 1);
+                                        bus_req_size = block_size_code();
+                                        bus_req_valid = true;
+
+                                        log << endl << "[C" << coreId
+                                            << "] BUS_UPGR ABORTED addr=" << requestAddr
+                                            << "; retrying as BUS_RDX";
+                                    }
+                                $;
+
+                            end if;
+
+                            // A peer won exclusive ownership while our UPGR
+                            // was queued and invalidated our shared copy. The
+                            // recovery request above is an RDX, so a modified
+                            // peer intervenes with the current block contents.
+                            if(cacheStatus == MISS) then
+                                do
+                                    $
+                                        busDone = bus_resp_valid;
+                                        if(!busDone) statBusWaitCycles++;
+                                    $;
+                                    if(not busDone) then wait end if;
+                                while(not busDone) end do;
+
+                                $
+                                    bus_resp_valid = false;
+                                    bus_req_valid = false;
+                                    responseErr = bus_resp_err;
+                                    responseData0 = bus_resp_d0;
+                                    responseData1 = bus_resp_d1;
+                                    responseData2 = bus_resp_d2;
+                                    responseData3 = bus_resp_d3;
+
+                                    if(responseErr == 0) {
+                                        write_cache(requestAddr, wb_victimWay,
+                                            current_time.cycle());
+                                        set_store_data();
+                                        write_data_to_cache(requestAddr, requestSize);
+                                        cache[wb_setIdx][wb_victimWay].state = MODIFIED;
+
+                                        log << endl << "[C" << coreId
+                                            << "] BUS_UPGR RECOVERED addr=" << requestAddr
+                                            << " via BUS_RDX";
+                                    }
+                                $;
+                            end if;
+
+                            // Only proceed if still a HIT (not downgraded to MISS above)
+                            if(cacheStatus == HIT and not upgradeNeeded) then
+
+                                // WRITE-THROUGH store on HIT
+                                if(wtNeeded) then
+                                    do
+                                        $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                        if(bufBusy) then wait end if;
+                                    while(bufBusy) end do;
+
+                                    $
+                                        statWriteThroughs++;
+                                        wbBlockAddr = wtStoreAddr;
+                                        wbSize = wtStoreSize;
+                                        wbData0 = responseData0;
+                                        wbData1 = responseData1;
+                                        wbData2 = responseData2;
+                                        wbData3 = responseData3;
+                                        wbPending = true;
+                                    $;
+
+                                    if(nonBlocking == 0) then
+                                        do
+                                            $ bufBusy = wbPending; $;
+                                            if(bufBusy) then wait end if;
+                                        while(bufBusy) end do;
+                                    end if;
+                                end if;
+
+                            end if;
+
+                            // If upgrade succeeded (cacheStatus still HIT, upgradeNeeded was true)
+                            if(cacheStatus == HIT and upgradeNeeded) then
+
+                                if(wtNeeded) then
+                                    do
+                                        $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                        if(bufBusy) then wait end if;
+                                    while(bufBusy) end do;
+
+                                    $
+                                        statWriteThroughs++;
+                                        wbBlockAddr = wtStoreAddr;
+                                        wbSize = wtStoreSize;
+                                        wbData0 = responseData0;
+                                        wbData1 = responseData1;
+                                        wbData2 = responseData2;
+                                        wbData3 = responseData3;
+                                        wbPending = true;
+                                    $;
+
+                                    if(nonBlocking == 0) then
+                                        do
+                                            $ bufBusy = wbPending; $;
+                                            if(bufBusy) then wait end if;
+                                        while(bufBusy) end do;
+                                    end if;
+                                end if;
+
+                            end if;
+
+                        else
+
+                            // MISS
+                            $
+                                statTotal++;
+                                statMisses++;
+                                missBlockAddr = requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
+                                stallLogged = false;
+                                wtNeeded = false;
+                                noAllocStore = (requestType == STORE) &&
+                                    (writePolicy == WT_NO_WRITE_ALLOCATE);
+
+                                log << endl
+                                    << "[C" << coreId << "] Cache MISS type="
+                                    << (int)requestType << " addr=" << requestAddr
+                                    << " wbPending=" << wbPending
+                                    << " cycle=" << current_time.cycle();
+                            $;
+
+                            if(noAllocStore) then
+                                $
+                                    set_store_data();
+                                    wtStoreAddr = requestAddr;
+                                    wtStoreSize = requestSize;
+                                    wtNeeded = true;
+                                $;
+
+                                do
+                                    $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                    if(bufBusy) then wait end if;
+                                while(bufBusy) end do;
+
+                                $
+                                    statWriteThroughs++;
+                                    wbBlockAddr = wtStoreAddr;
+                                    wbSize = wtStoreSize;
+                                    wbData0 = responseData0;
+                                    wbData1 = responseData1;
+                                    wbData2 = responseData2;
+                                    wbData3 = responseData3;
+                                    wbPending = true;
+                                $;
+
+                                if(nonBlocking == 0) then
+                                    do
+                                        $ bufBusy = wbPending; $;
+                                        if(bufBusy) then wait end if;
+                                    while(bufBusy) end do;
+                                end if;
+
+                            else
+
+                                // Stall on write-buffer conflict
+                                do
+                                    $
+                                        conflict = wbPending &&
+                                            ((wbBlockAddr & ~((uint32_t)BLOCK_SIZE - 1)) == missBlockAddr);
+                                        if(conflict) {
+                                            statConflictStall++;
+                                            if(!stallLogged) { stallLogged = true; }
+                                        }
+                                    $;
+                                    if(conflict) then wait end if;
+                                while(conflict) end do;
+
+                                // Choose victim
+                                $
+                                    wb_setIdx = get_set_index(requestAddr);
+                                    wb_victimWay = select_victim_way(wb_setIdx);
+                                    wb_needWriteback = cache[wb_setIdx][wb_victimWay].isDirty();
+                                    wb_victimAddr = 0;
+                                    if(wb_needWriteback) {
+                                        wb_victimAddr = get_block_addr_from_tag_set(
+                                            cache[wb_setIdx][wb_victimWay].tagBit, wb_setIdx);
+                                    }
+                                $;
+
+                                // Park dirty victim
+                                if(wb_needWriteback) then
+                                    do
+                                        $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                        if(bufBusy) then wait end if;
+                                    while(bufBusy) end do;
+
+                                    $
+                                        statWritebacks++;
+                                        read_block_for_writeback(wb_setIdx, wb_victimWay);
+                                        wbData0 = responseData0;
+                                        wbData1 = responseData1;
+                                        wbData2 = responseData2;
+                                        wbData3 = responseData3;
+                                        wbBlockAddr = wb_victimAddr;
+                                        wbSize = block_size_code();
+                                        wbPending = true;
+                                        cache[wb_setIdx][wb_victimWay].state = INVALID;
+                                    $;
+
+                                    if(nonBlocking == 0) then
+                                        do
+                                            $ bufBusy = wbPending; $;
+                                            if(bufBusy) then wait end if;
+                                        while(bufBusy) end do;
+                                    end if;
+                                end if;
+
+                                // Fetch via bus (both ICache and DCache)
+                                if(isDcache == 0) then
+
+                                    // ICache path: bus-based access (coherent)
+                                    $
+                                        bus_req_cmd = BUS_RD;
+                                        bus_req_addr = requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
+                                        bus_req_size = block_size_code();
+                                        bus_req_valid = true;
+                                        statBusRd++;
+
+                                        log << endl
+                                            << "[C" << coreId << "] BUS_REQ cmd="
+                                            << (int)bus_req_cmd << " addr=" << bus_req_addr;
+                                    $;
+
+                                    do
+                                        $
+                                            busDone = bus_resp_valid;
+                                            if(!busDone) statBusWaitCycles++;
+                                        $;
+                                        if(not busDone) then wait end if;
+                                    while(not busDone) end do;
+
+                                    $
+                                        bus_resp_valid = false;
+                                        bus_req_valid = false;
+                                        responseErr = bus_resp_err;
+                                        responseData0 = bus_resp_d0;
+                                        responseData1 = bus_resp_d1;
+                                        responseData2 = bus_resp_d2;
+                                        responseData3 = bus_resp_d3;
+                                    $;
+
+                                else
+
+                                    // DCache path: bus-based access
+                                    $
+                                        if(requestType == STORE) {
+                                            bus_req_cmd = BUS_RDX;
+                                            statBusRdx++;
+                                        }
+                                        else {
+                                            bus_req_cmd = BUS_RD;
+                                            statBusRd++;
+                                        }
+                                        bus_req_addr = requestAddr & ~((uint32_t)BLOCK_SIZE - 1);
+                                        bus_req_size = block_size_code();
+                                        bus_req_valid = true;
+
+                                        log << endl
+                                            << "[C" << coreId << "] BUS_REQ cmd="
+                                            << (int)bus_req_cmd << " addr=" << bus_req_addr;
+                                    $;
+
+                                    do
+                                        $
+                                            busDone = bus_resp_valid;
+                                            if(!busDone) statBusWaitCycles++;
+                                        $;
+                                        if(not busDone) then wait end if;
+                                    while(not busDone) end do;
+
+                                    $
+                                        bus_resp_valid = false;
+                                        bus_req_valid = false;
+                                        responseErr = bus_resp_err;
+                                        responseData0 = bus_resp_d0;
+                                        responseData1 = bus_resp_d1;
+                                        responseData2 = bus_resp_d2;
+                                        responseData3 = bus_resp_d3;
+                                    $;
+
+                                end if;
+
+                                // Install block
+                                $
+                                    if(responseErr == 0) {
+                                        write_cache(requestAddr, wb_victimWay, current_time.cycle());
+
+                                        if(requestType == STORE) {
+                                            set_store_data();
+                                            write_data_to_cache(requestAddr, requestSize);
+
+                                            if(isDcache) {
+                                                cache[wb_setIdx][wb_victimWay].state = MODIFIED;
+                                            }
+                                            else if(writePolicy == WT_WRITE_ALLOCATE) {
+                                                wtNeeded = true;
+                                                wtStoreAddr = requestAddr;
+                                                wtStoreSize = requestSize;
+                                            }
+                                        }
+                                        else {
+                                            int dummyHitState;
+                                            read_cache(requestAddr, requestSize, 0,
+                                                current_time.cycle(), dummyHitState);
+                                        }
+                                    }
+                                $;
+
+                                // WT on miss
+                                if(wtNeeded) then
+                                    do
+                                        $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                        if(bufBusy) then wait end if;
+                                    while(bufBusy) end do;
+
+                                    $
+                                        statWriteThroughs++;
+                                        wbBlockAddr = wtStoreAddr;
+                                        wbSize = wtStoreSize;
+                                        wbData0 = responseData0;
+                                        wbData1 = responseData1;
+                                        wbData2 = responseData2;
+                                        wbData3 = responseData3;
+                                        wbPending = true;
+                                    $;
+
+                                    if(nonBlocking == 0) then
+                                        do
+                                            $ bufBusy = wbPending; $;
+                                            if(bufBusy) then wait end if;
+                                        while(bufBusy) end do;
+                                    end if;
+                        end if;
+
+                    end if;
+
+
+                end if;
+
+            end if;
+
+            end if;
+
+            end if;
+
+            // Save response data before the CACHE_DELAY wait to prevent
+            // snoop operations (called by the bus while this cache is
+            // waiting) from overwriting responseData0..3.
+            $
+                savedResponseErr = responseErr;
+                savedResponseData0 = responseData0;
+                savedResponseData1 = responseData1;
+                savedResponseData2 = responseData2;
+                savedResponseData3 = responseData3;
+            $;
+
+            // Cache access delay
+            wait(CACHE_DELAY, 0);
+
+            // Send response using the saved values
+            $
+                resp_err = savedResponseErr;
+                resp_data0 = savedResponseData0;
+                resp_data1 = savedResponseData1;
+                resp_data2 = savedResponseData2;
+                resp_data3 = savedResponseData3;
+                resp_valid = true;
+            $;
+
+            do
+                $ hasToken = resp_valid; $;
+                if(hasToken) then wait end if;
+            while(hasToken) end do;
+
+        while(1) end do;
+
+    end behavior
+
+end procedure
+
+
+
+// =====================================================================
+// Write engine: drains the write buffer to memory
+// =====================================================================
+procedure WbEngine
+
+    parameter int BLOCK_SIZE = 16
+    parameter int USE_BUS = 0
+
+    include $#include <cstdlib>$
+    include $#include <cstdint>$
+
+    decl $
+
+        enum MemOpType { IFETCH = 0, LOAD = 1, STORE = 2, ATOMICLOADSTORE = 3 };
+        enum MemSize { WORD = 0, DOUBLEWORD = 1, QUADWORD = 2 };
+        enum BusCmd { BUS_NONE = 0, BUS_RD = 1, BUS_RDX = 2, BUS_UPGR = 3, BUS_WB = 4, BUS_ATOMIC = 5 };
+
+        bool *wb_pending;
+        bool *mem_busy;
+        bool *fe_waiting;
+        uint32_t *wb_block_addr;
+        uint8_t *wb_size;
+        uint32_t *wb_d0;
+        uint32_t *wb_d1;
+        uint32_t *wb_d2;
+        uint32_t *wb_d3;
+        long *wb_done_cnt;
+        long *wb_wait_total;
+        long *wb_wait_max;
+
+        // Bus channels (used when USE_BUS=1)
+        bool *wb_bus_req_valid;
+        bool *wb_bus_resp_valid;
+        uint32_t *wb_bus_addr;
+        uint8_t *wb_bus_size;
+        uint32_t *wb_bus_d0;
+        uint32_t *wb_bus_d1;
+        uint32_t *wb_bus_d2;
+        uint32_t *wb_bus_d3;
+        uint8_t *wb_bus_err;
+
+        token<22> requestToMemory;
+        token<17> responseFromMemory;
+
+        uint8_t responseErr;
+        uint32_t responseData0;
+        uint32_t responseData1;
+        uint32_t responseData2;
+        uint32_t responseData3;
+
+        bool hasWork;
+        bool ok;
+        bool hasToken;
+        bool pulled;
+        bool useBus;
+        bool busDone;
+        uint32_t activeWbAddr;
+        long wbWaitBegin;
+        long wbWaitDur;
+
+        void prepareWriteback() {
+            uint32_t addr = *wb_block_addr;
+            uint8_t type = STORE;
+            uint8_t size = *wb_size;
+            uint32_t d0 = *wb_d0;
+            uint32_t d1 = *wb_d1;
+            uint32_t d2 = *wb_d2;
+            uint32_t d3 = *wb_d3;
+            sitar::pack(requestToMemory, addr, type, size, d0, d1, d2, d3);
+        }
+
+        inport<17>* m_inp;
+        outport<22>* m_outp;
+    $
+
+    init $
+        useBus = USE_BUS;
+    $
+
+    behavior
+
+        do
+
+            if(useBus == 0) then
+
+                // Direct memory access path - need to check mem_busy
+                do
+                    $
+                        hasWork = (*wb_pending) && (!(*fe_waiting)) && (!(*mem_busy));
+                        if(hasWork) *mem_busy = true;
+                    $;
+                    if(not hasWork) then wait end if;
+                while(not hasWork) end do;
+
+                // Direct memory access path
+                $
+                    prepareWriteback();
+                    log << endl << "MEM WRITE START addr=" << *wb_block_addr
+                        << " size=" << (int)*wb_size << " cycle=" << current_time.cycle();
+                $;
+
+                do
+                    wait until(this_phase == 1);
+                    $ ok = m_outp->push(requestToMemory); $;
+                    if(not ok) then wait end if;
+                while(not ok) end do;
+
+                do
+                    wait until(this_phase == 0);
+                    $ hasToken = m_inp->peek(responseFromMemory); $;
+                    if(not hasToken) then wait end if;
+                while(not hasToken) end do;
+
+                $
+                    pulled = m_inp->pull(responseFromMemory);
+                    sitar::unpack(responseFromMemory, responseErr,
+                        responseData0, responseData1, responseData2, responseData3);
+                    if(responseErr != 0) log << endl << "MEM WRITE ERROR=" << (int)responseErr;
+                    log << endl << "MEM WRITE DONE addr=" << *wb_block_addr
+                        << " cycle=" << current_time.cycle();
+                    (*wb_done_cnt)++;
+                    *wb_pending = false;
+                    *mem_busy = false;
+                $;
+
+            else
+
+                // Bus-based write-back path - no need to check mem_busy
+                do
+                    $
+                        hasWork = *wb_pending;
+                    $;
+                    if(not hasWork) then wait end if;
+                while(not hasWork) end do;
+
+                // Bus-based write-back path
+                $
+                    activeWbAddr = *wb_block_addr;
+                    *wb_bus_resp_valid = false;
+                    *wb_bus_err = 0;
+                    *wb_bus_req_valid = true;
+                    *wb_bus_addr = activeWbAddr;
+                    *wb_bus_size = *wb_size;
+                    *wb_bus_d0 = *wb_d0;
+                    *wb_bus_d1 = *wb_d1;
+                    *wb_bus_d2 = *wb_d2;
+                    *wb_bus_d3 = *wb_d3;
+
+                    wbWaitBegin = current_time.cycle();
+
+                    log << endl << "BUS WB START addr=" << activeWbAddr
+                        << " size=" << (int)*wb_size << " cycle=" << current_time.cycle();
+                $;
+
+                do
+                    $
+                        busDone = *wb_bus_resp_valid;
+                    $;
+                    if(not busDone) then wait end if;
+                while(not busDone) end do;
+
+                $
+                    *wb_bus_resp_valid = false;
+                    *wb_bus_req_valid = false;
+
+                    wbWaitDur = current_time.cycle() - wbWaitBegin;
+                    (*wb_wait_total) += wbWaitDur;
+                    if(wbWaitDur > (*wb_wait_max)) (*wb_wait_max) = wbWaitDur;
+
+                    if(*wb_bus_err == 3) {
+                        log << endl << "BUS WB CANCELLED BY SNOOP addr="
+                            << activeWbAddr << " cycle=" << current_time.cycle();
+                    }
+                    else if(*wb_bus_err != 0) {
+                        log << endl << "BUS WB ERROR=" << (int)*wb_bus_err
+                            << " addr=" << activeWbAddr
+                            << " cycle=" << current_time.cycle();
+                    }
+                    else {
+                        log << endl << "BUS WB DONE addr=" << activeWbAddr
+                            << " cycle=" << current_time.cycle();
+                    }
+                    (*wb_done_cnt)++;
+                    *wb_pending = false;
+                $;
+
+            end if;
+
+        while(1) end do;
+
+    end behavior
+
+end procedure
+
+
+
+// =====================================================================
+// CoherenceBus: arbitrates between two data caches and shared memory,
+// implements MSI snooping protocol.
+// =====================================================================
+procedure CoherenceBus
+
+    parameter int BLOCK_SIZE = 16
+    parameter int BUS_SNOOP_DELAY = 2
+    parameter int NUM_SETS = 2
+    parameter int NUM_WAYS = 8
+    parameter int CACHE_DELAY = 4
+    parameter int REPL_POLICY = 1
+    parameter int WRITE_POLICY = 0
+
+    include $#include <cstdlib>$
+    include $#include <cstdint>$
+    include $#include "Cache.h"$
+
+    decl $
+
+        enum MemOpType { IFETCH = 0, LOAD = 1, STORE = 2, ATOMICLOADSTORE = 3 };
+        enum MemSize { WORD = 0, DOUBLEWORD = 1, QUADWORD = 2 };
+
+        enum BusCmd {
+            BUS_NONE = 0, BUS_RD = 1, BUS_RDX = 2,
+            BUS_UPGR = 3, BUS_WB = 4, BUS_ATOMIC = 5
+        };
+
+        // Use typed pointers to the specific Cache instantiation.
+        // Both cache pairs participate in coherence. The icache pair is
+        // read-only, so its snoops only confirm sharing and never invalidate.
+        Cache<NUM_SETS, NUM_WAYS, BLOCK_SIZE, CACHE_DELAY, REPL_POLICY, WRITE_POLICY, 0, 1> *dcache0;
+        Cache<NUM_SETS, NUM_WAYS, BLOCK_SIZE, CACHE_DELAY, REPL_POLICY, WRITE_POLICY, 1, 1> *dcache1;
+        Cache<4, 4, BLOCK_SIZE, CACHE_DELAY, REPL_POLICY, WRITE_POLICY, 0, 0> *icache0;
+        Cache<4, 4, BLOCK_SIZE, CACHE_DELAY, REPL_POLICY, WRITE_POLICY, 1, 0> *icache1;
+
+        // Bus request/response channels for each cache (front-end)
+        bool *bus0_req_valid;
+        bool *bus0_resp_valid;
+        uint8_t *bus0_req_cmd;
+        uint32_t *bus0_req_addr;
+        uint8_t *bus0_req_size;
+        uint8_t *bus0_resp_err;
+        uint32_t *bus0_resp_d0;
+        uint32_t *bus0_resp_d1;
+        uint32_t *bus0_resp_d2;
+        uint32_t *bus0_resp_d3;
+
+        bool *bus1_req_valid;
+        bool *bus1_resp_valid;
+        uint8_t *bus1_req_cmd;
+        uint32_t *bus1_req_addr;
+        uint8_t *bus1_req_size;
+        uint8_t *bus1_resp_err;
+        uint32_t *bus1_resp_d0;
+        uint32_t *bus1_resp_d1;
+        uint32_t *bus1_resp_d2;
+        uint32_t *bus1_resp_d3;
+
+        // ICache bus request/response channels
+        bool *bus_ic0_req_valid;
+        bool *bus_ic0_resp_valid;
+        uint8_t *bus_ic0_req_cmd;
+        uint32_t *bus_ic0_req_addr;
+        uint8_t *bus_ic0_req_size;
+        uint8_t *bus_ic0_resp_err;
+        uint32_t *bus_ic0_resp_d0;
+        uint32_t *bus_ic0_resp_d1;
+        uint32_t *bus_ic0_resp_d2;
+        uint32_t *bus_ic0_resp_d3;
+
+        bool *bus_ic1_req_valid;
+        bool *bus_ic1_resp_valid;
+        uint8_t *bus_ic1_req_cmd;
+        uint32_t *bus_ic1_req_addr;
+        uint8_t *bus_ic1_req_size;
+        uint8_t *bus_ic1_resp_err;
+        uint32_t *bus_ic1_resp_d0;
+        uint32_t *bus_ic1_resp_d1;
+        uint32_t *bus_ic1_resp_d2;
+        uint32_t *bus_ic1_resp_d3;
+
+        // WbEngine bus channels (for write-backs)
+        bool *wb0_bus_req_valid;
+        bool *wb0_bus_resp_valid;
+        uint32_t *wb0_bus_addr;
+        uint8_t *wb0_bus_size;
+        uint32_t *wb0_bus_d0;
+        uint32_t *wb0_bus_d1;
+        uint32_t *wb0_bus_d2;
+        uint32_t *wb0_bus_d3;
+        uint8_t *wb0_bus_err;
+
+        bool *wb1_bus_req_valid;
+        bool *wb1_bus_resp_valid;
+        uint32_t *wb1_bus_addr;
+        uint8_t *wb1_bus_size;
+        uint32_t *wb1_bus_d0;
+        uint32_t *wb1_bus_d1;
+        uint32_t *wb1_bus_d2;
+        uint32_t *wb1_bus_d3;
+        uint8_t *wb1_bus_err;
+
+        // Memory ports (instruction and data)
+        token<22> requestToMemory;
+        token<17> responseFromMemory;
+
+        inport<17>* im_inp;
+        outport<22>* im_outp;
+        inport<17>* dm_inp;
+        outport<22>* dm_outp;
+
+        // Arbitration: single rotating pointer over all six requesters
+        //   0=dcache0, 1=dcache1, 2=icache0, 3=icache1, 4=wb0, 5=wb1
+        int rrPtr;
+        bool anyRequest;
+        int grantedId;
+        bool grantedIsIcache;
+        uint8_t grantedCmd;
+        uint32_t grantedAddr;
+        uint8_t grantedSize;
+        bool isWbRequest;
+        int wbId;
+        uint32_t wbReqAddr;
+        uint8_t wbReqSize;
+        uint32_t wbReqD0;
+        uint32_t wbReqD1;
+        uint32_t wbReqD2;
+        uint32_t wbReqD3;
+
+        // Snoop results
+        bool suppliedDirty;
+        uint32_t snoopD0;
+        uint32_t snoopD1;
+        uint32_t snoopD2;
+        uint32_t snoopD3;
+        bool snoopHit;
+
+        // Block address used for the snoop phase. For most commands this
+        // equals grantedAddr; for BUS_ATOMIC the requester passes the exact
+        // word address, so the block must be re-derived for the snoop.
+        uint32_t snoopAddr;
+
+        // Requester-side flush data for BUS_ATOMIC
+        bool reqDirty;
+        uint32_t reqD0;
+        uint32_t reqD1;
+        uint32_t reqD2;
+        uint32_t reqD3;
+
+        // Memory transaction
+        bool ok;
+        bool hasToken;
+        bool pulled;
+        uint8_t responseErr;
+        uint32_t responseData0;
+        uint32_t responseData1;
+        uint32_t responseData2;
+        uint32_t responseData3;
+
+        // Stats
+        long statTotalTransactions;
+        long statUpgrTransactions;
+        long statRdTransactions;
+        long statRdxTransactions;
+        long statAtomicTransactions;
+        long statBothDirty;
+        long statInvariantViolations;
+
+        void prepareMemLoad(uint32_t blockAddr) {
+            uint8_t blockSize;
+            if(BLOCK_SIZE == 4) blockSize = WORD;
+            else if(BLOCK_SIZE == 8) blockSize = DOUBLEWORD;
+            else blockSize = QUADWORD;
+            sitar::pack(requestToMemory, blockAddr, (uint8_t)LOAD, blockSize,
+                (uint32_t)0, (uint32_t)0, (uint32_t)0, (uint32_t)0);
+        }
+
+        void prepareMemStore(uint32_t addr, uint8_t size,
+            uint32_t d0, uint32_t d1, uint32_t d2, uint32_t d3) {
+            sitar::pack(requestToMemory, addr, (uint8_t)STORE, size, d0, d1, d2, d3);
+        }
+
+        void prepareMemAtomic(uint32_t wordAddr, uint8_t size) {
+            sitar::pack(requestToMemory, wordAddr, (uint8_t)ATOMICLOADSTORE, size,
+                (uint32_t)0, (uint32_t)0, (uint32_t)0, (uint32_t)0);
+        }
+
+    $
+
+    init $
+        rrPtr = 0;
+        statTotalTransactions = 0;
+        statUpgrTransactions = 0;
+        statRdTransactions = 0;
+        statRdxTransactions = 0;
+        statAtomicTransactions = 0;
+        statBothDirty = 0;
+        statInvariantViolations = 0;
+    $
+
+    behavior
+
+        do
+
+            // Wait for any bus request (from caches or WbEngines)
+            do
+                $
+                    anyRequest =
+                        ((*bus0_req_valid) && (!(*bus0_resp_valid))) ||
+                        ((*bus1_req_valid) && (!(*bus1_resp_valid))) ||
+                        ((*bus_ic0_req_valid) && (!(*bus_ic0_resp_valid))) ||
+                        ((*bus_ic1_req_valid) && (!(*bus_ic1_resp_valid))) ||
+                        ((*wb0_bus_req_valid) && (!(*wb0_bus_resp_valid))) ||
+                        ((*wb1_bus_req_valid) && (!(*wb1_bus_resp_valid)));
+                $;
+                if(not anyRequest) then wait end if;
+            while(not anyRequest) end do;
+
+            // Fair round-robin arbitration across all bus requesters.
+            // The rotating pointer spans front-end demand (dcache0, dcache1,
+            // icache0, icache1) AND the write-back engines (wb0, wb1). No
+            // requester has a fixed priority, so neither the instruction
+            // caches nor a write-back engine can be starved by the others.
+            $
+                grantedId = -1;
+                grantedIsIcache = false;
+                isWbRequest = false;
+                wbId = -1;
+
+                bool reqPresent[6];
+                reqPresent[0] = (*bus0_req_valid)    && (!(*bus0_resp_valid));
+                reqPresent[1] = (*bus1_req_valid)    && (!(*bus1_resp_valid));
+                reqPresent[2] = (*bus_ic0_req_valid) && (!(*bus_ic0_resp_valid));
+                reqPresent[3] = (*bus_ic1_req_valid) && (!(*bus_ic1_resp_valid));
+                reqPresent[4] = (*wb0_bus_req_valid) && (!(*wb0_bus_resp_valid));
+                reqPresent[5] = (*wb1_bus_req_valid) && (!(*wb1_bus_resp_valid));
+
+                int grantSlot = -1;
+                for(int i = 0; i < 6; i++) {
+                    int s = (rrPtr + i) % 6;
+                    if(reqPresent[s]) { grantSlot = s; break; }
+                }
+
+                if(grantSlot >= 0) {
+                    rrPtr = (grantSlot + 1) % 6;
+                    if(grantSlot == 0) { grantedId = 0; grantedIsIcache = false; }
+                    else if(grantSlot == 1) { grantedId = 1; grantedIsIcache = false; }
+                    else if(grantSlot == 2) { grantedId = 0; grantedIsIcache = true; }
+                    else if(grantSlot == 3) { grantedId = 1; grantedIsIcache = true; }
+                    else { isWbRequest = true; wbId = grantSlot - 4; }
+                }
+
+                if(!isWbRequest) {
+                    if(grantedIsIcache) {
+                        if(grantedId == 0) {
+                            grantedCmd = *bus_ic0_req_cmd;
+                            grantedAddr = *bus_ic0_req_addr;
+                            grantedSize = *bus_ic0_req_size;
+                        }
+                        else {
+                            grantedCmd = *bus_ic1_req_cmd;
+                            grantedAddr = *bus_ic1_req_addr;
+                            grantedSize = *bus_ic1_req_size;
+                        }
+                    }
+                    else {
+                        if(grantedId == 0) {
+                            grantedCmd = *bus0_req_cmd;
+                            grantedAddr = *bus0_req_addr;
+                            grantedSize = *bus0_req_size;
+                        }
+                        else {
+                            grantedCmd = *bus1_req_cmd;
+                            grantedAddr = *bus1_req_addr;
+                            grantedSize = *bus1_req_size;
+                        }
+                    }
+                    // For BUS_ATOMIC the requester passes the exact word
+                    // address; the snoop operates on the enclosing block.
+                    if(grantedCmd == BUS_ATOMIC) {
+                        snoopAddr = grantedAddr & ~((uint32_t)BLOCK_SIZE - 1);
+                    }
+                    else {
+                        snoopAddr = grantedAddr;
+                    }
+                }
+                else {
+                    grantedCmd = BUS_WB;
+                    if(wbId == 0) {
+                        grantedAddr = *wb0_bus_addr;
+                        grantedSize = *wb0_bus_size;
+                    }
+                    else {
+                        grantedAddr = *wb1_bus_addr;
+                        grantedSize = *wb1_bus_size;
+                    }
+                    snoopAddr = grantedAddr;
+                }
+
+                suppliedDirty = false;
+                snoopHit = false;
+                snoopD0 = 0; snoopD1 = 0; snoopD2 = 0; snoopD3 = 0;
+                reqDirty = false;
+                reqD0 = 0; reqD1 = 0; reqD2 = 0; reqD3 = 0;
+
+                // Snoop the peer cache for every non-write-back transaction.
+                // The dcache pair participates in data coherence. The icache
+                // pair is read-only but is still snooped on instruction
+                // fetches so both instruction caches observe the same shared
+                // copy; an icache snoop never supplies dirty data.
+                //
+                // Each core's cache is a different template type (different
+                // CORE_ID), so handle_snoop must be called explicitly.
+                if(!isWbRequest && grantedCmd != BUS_WB) {
+                    if(grantedIsIcache) {
+                        if(grantedId == 0) {
+                            snoopHit = icache1->handle_snoop(
+                                grantedCmd, snoopAddr,
+                                suppliedDirty, snoopD0, snoopD1, snoopD2, snoopD3);
+                        }
+                        else {
+                            snoopHit = icache0->handle_snoop(
+                                grantedCmd, snoopAddr,
+                                suppliedDirty, snoopD0, snoopD1, snoopD2, snoopD3);
+                        }
+                    }
+                    else {
+                        if(grantedId == 0) {
+                            snoopHit = dcache1->handle_snoop(
+                                grantedCmd, snoopAddr,
+                                suppliedDirty, snoopD0, snoopD1, snoopD2, snoopD3);
+                        }
+                        else {
+                            snoopHit = dcache0->handle_snoop(
+                                grantedCmd, snoopAddr,
+                                suppliedDirty, snoopD0, snoopD1, snoopD2, snoopD3);
+                        }
+                    }
+                }
+
+                statTotalTransactions++;
+
+                log << endl
+                    << "BUS GRANT "
+                    << (isWbRequest ? "wb=" : "core=")
+                    << (isWbRequest ? wbId : grantedId)
+                    << " cmd=" << (int)grantedCmd
+                    << " addr=" << grantedAddr
+                    << " snoopHit=" << snoopHit
+                    << " dirtyIntervention=" << suppliedDirty
+                    << " cycle=" << current_time.cycle();
+            $;
+
+            // Execute a write-engine request separately from cache demand
+            // requests. The bus owns the shared memory port and returns one
+            // acknowledgement, preventing the WbEngine from reissuing it.
+            if(isWbRequest) then
+
+                $
+                    if(wbId == 0) {
+                        wbReqAddr = *wb0_bus_addr;
+                        wbReqSize = *wb0_bus_size;
+                        wbReqD0 = *wb0_bus_d0;
+                        wbReqD1 = *wb0_bus_d1;
+                        wbReqD2 = *wb0_bus_d2;
+                        wbReqD3 = *wb0_bus_d3;
+                    }
+                    else {
+                        wbReqAddr = *wb1_bus_addr;
+                        wbReqSize = *wb1_bus_size;
+                        wbReqD0 = *wb1_bus_d0;
+                        wbReqD1 = *wb1_bus_d1;
+                        wbReqD2 = *wb1_bus_d2;
+                        wbReqD3 = *wb1_bus_d3;
+                    }
+
+                    prepareMemStore(wbReqAddr, wbReqSize,
+                        wbReqD0, wbReqD1, wbReqD2, wbReqD3);
+                    log << endl << "BUS WB EXEC wb=" << wbId
+                        << " addr=" << wbReqAddr
+                        << " size=" << (int)wbReqSize
+                        << " cycle=" << current_time.cycle();
+                $;
+
+                do
+                    wait until(this_phase == 1);
+                    $ ok = dm_outp->push(requestToMemory); $;
+                    if(not ok) then wait end if;
+                while(not ok) end do;
+
+                do
+                    wait until(this_phase == 0);
+                    $ hasToken = dm_inp->peek(responseFromMemory); $;
+                    if(not hasToken) then wait end if;
+                while(not hasToken) end do;
+
+                $
+                    pulled = dm_inp->pull(responseFromMemory);
+                    sitar::unpack(responseFromMemory, responseErr,
+                        responseData0, responseData1, responseData2, responseData3);
+
+                    if(wbId == 0) {
+                        *wb0_bus_err = responseErr;
+                        *wb0_bus_resp_valid = true;
+                    }
+                    else {
+                        *wb1_bus_err = responseErr;
+                        *wb1_bus_resp_valid = true;
+                    }
+
+                    log << endl << "BUS WB DONE wb=" << wbId
+                        << " addr=" << wbReqAddr
+                        << " cycle=" << current_time.cycle();
+                $;
+
+            else
+
+            // Execute front-end coherence transaction based on command
+            if(grantedCmd == BUS_UPGR) then
+
+                // BUS_UPGR: snoop-only, no memory access needed
+                $
+                    statUpgrTransactions++;
+                $;
+
+                wait(BUS_SNOOP_DELAY, 0);
+
+                $
+                    if(grantedId == 0) {
+                        *bus0_resp_err = 0;
+                        *bus0_resp_d0 = 0; *bus0_resp_d1 = 0;
+                        *bus0_resp_d2 = 0; *bus0_resp_d3 = 0;
+                        *bus0_resp_valid = true;
+                    }
+                    else {
+                        *bus1_resp_err = 0;
+                        *bus1_resp_d0 = 0; *bus1_resp_d1 = 0;
+                        *bus1_resp_d2 = 0; *bus1_resp_d3 = 0;
+                        *bus1_resp_valid = true;
+                    }
+                $;
+
+            else
+
+                if(grantedCmd == BUS_RD) then
+
+                    // BUS_RD: read miss (dcache or icache)
+                    if(suppliedDirty) then
+
+                        // Peer supplied dirty data; write it to memory for coherence
+                        $
+                            statRdTransactions++;
+                            prepareMemStore(grantedAddr,
+                                (BLOCK_SIZE == 4) ? WORD :
+                                (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
+                                snoopD0, snoopD1, snoopD2, snoopD3);
+                        $;
+
+                        do
+                            wait until(this_phase == 1);
+                            $ ok = dm_outp->push(requestToMemory); $;
+                            if(not ok) then wait end if;
+                        while(not ok) end do;
+
+                        do
+                            wait until(this_phase == 0);
+                            $ hasToken = dm_inp->peek(responseFromMemory); $;
+                            if(not hasToken) then wait end if;
+                        while(not hasToken) end do;
+
+                        $
+                            pulled = dm_inp->pull(responseFromMemory);
+                            sitar::unpack(responseFromMemory, responseErr,
+                                responseData0, responseData1, responseData2, responseData3);
+                        $;
+
+                        // Return the dirty data to requester
+                        $
+                            if(grantedIsIcache) {
+                                if(grantedId == 0) {
+                                    *bus_ic0_resp_err = 0;
+                                    *bus_ic0_resp_d0 = snoopD0; *bus_ic0_resp_d1 = snoopD1;
+                                    *bus_ic0_resp_d2 = snoopD2; *bus_ic0_resp_d3 = snoopD3;
+                                    *bus_ic0_resp_valid = true;
+                                }
+                                else {
+                                    *bus_ic1_resp_err = 0;
+                                    *bus_ic1_resp_d0 = snoopD0; *bus_ic1_resp_d1 = snoopD1;
+                                    *bus_ic1_resp_d2 = snoopD2; *bus_ic1_resp_d3 = snoopD3;
+                                    *bus_ic1_resp_valid = true;
+                                }
+                            }
+                            else {
+                                if(grantedId == 0) {
+                                    *bus0_resp_err = 0;
+                                    *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
+                                    *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
+                                    *bus0_resp_valid = true;
+                                }
+                                else {
+                                    *bus1_resp_err = 0;
+                                    *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
+                                    *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
+                                    *bus1_resp_valid = true;
+                                }
+                            }
+                        $;
+
+                    else
+
+                        // No dirty intervention; fetch from memory (IM for icache, DM for dcache)
+                        $
+                            statRdTransactions++;
+                            prepareMemLoad(grantedAddr);
+                        $;
+
+                        do
+                            wait until(this_phase == 1);
+                            $ ok = (grantedIsIcache ? im_outp : dm_outp)->push(requestToMemory); $;
+                            if(not ok) then wait end if;
+                        while(not ok) end do;
+
+                        do
+                            wait until(this_phase == 0);
+                            $ hasToken = (grantedIsIcache ? im_inp : dm_inp)->peek(responseFromMemory); $;
+                            if(not hasToken) then wait end if;
+                        while(not hasToken) end do;
+
+                        $
+                            pulled = (grantedIsIcache ? im_inp : dm_inp)->pull(responseFromMemory);
+                            sitar::unpack(responseFromMemory, responseErr,
+                                responseData0, responseData1, responseData2, responseData3);
+
+                            if(grantedIsIcache) {
+                                if(grantedId == 0) {
+                                    *bus_ic0_resp_err = responseErr;
+                                    *bus_ic0_resp_d0 = responseData0; *bus_ic0_resp_d1 = responseData1;
+                                    *bus_ic0_resp_d2 = responseData2; *bus_ic0_resp_d3 = responseData3;
+                                    *bus_ic0_resp_valid = true;
+                                }
+                                else {
+                                    *bus_ic1_resp_err = responseErr;
+                                    *bus_ic1_resp_d0 = responseData0; *bus_ic1_resp_d1 = responseData1;
+                                    *bus_ic1_resp_d2 = responseData2; *bus_ic1_resp_d3 = responseData3;
+                                    *bus_ic1_resp_valid = true;
+                                }
+                            }
+                            else {
+                                if(grantedId == 0) {
+                                    *bus0_resp_err = responseErr;
+                                    *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
+                                    *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
+                                    *bus0_resp_valid = true;
+                                }
+                                else {
+                                    *bus1_resp_err = responseErr;
+                                    *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
+                                    *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
+                                    *bus1_resp_valid = true;
+                                }
+                            }
+                        $;
+
+                    end if;
+
+                else
+
+                    if(grantedCmd == BUS_RDX) then
+
+                        // BUS_RDX: write miss (exclusive)
+                        if(suppliedDirty) then
+
+                            // Peer supplied dirty data; give it directly to requester
+                            $
+                                statRdxTransactions++;
+
+                                if(grantedId == 0) {
+                                    *bus0_resp_err = 0;
+                                    *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
+                                    *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
+                                    *bus0_resp_valid = true;
+                                }
+                                else {
+                                    *bus1_resp_err = 0;
+                                    *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
+                                    *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
+                                    *bus1_resp_valid = true;
+                                }
+                            $;
+
+                            wait(BUS_SNOOP_DELAY, 0);
+
+                        else
+
+                            // No dirty data; fetch from memory
+                            $
+                                statRdxTransactions++;
+                                prepareMemLoad(grantedAddr);
+                            $;
+
+                            do
+                                wait until(this_phase == 1);
+                                $ ok = dm_outp->push(requestToMemory); $;
+                                if(not ok) then wait end if;
+                            while(not ok) end do;
+
+                            do
+                                wait until(this_phase == 0);
+                                $ hasToken = dm_inp->peek(responseFromMemory); $;
+                                if(not hasToken) then wait end if;
+                            while(not hasToken) end do;
+
+                            $
+                                pulled = dm_inp->pull(responseFromMemory);
+                                sitar::unpack(responseFromMemory, responseErr,
+                                    responseData0, responseData1, responseData2, responseData3);
+
+                                if(grantedId == 0) {
+                                    *bus0_resp_err = responseErr;
+                                    *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
+                                    *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
+                                    *bus0_resp_valid = true;
+                                }
+                                else {
+                                    *bus1_resp_err = responseErr;
+                                    *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
+                                    *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
+                                    *bus1_resp_valid = true;
+                                }
+                            $;
+
+                        end if;
+
+                    else if(grantedCmd == BUS_ATOMIC) then
+
+                        // BUS_ATOMIC: coherent read-modify-write.
+                        //
+                        // Ordering:
+                        //   1. Release the requester's own copy of the block
+                        //      (capture its dirty data if MODIFIED, invalidate
+                        //      always).
+                        //   2. Flush the peer's dirty copy (older data) to DM
+                        //      FIRST (already snooped in the arbitration block).
+                        //   3. Flush the requester's dirty copy (newer data) to
+                        //      DM LAST, so the requester's authoritative value
+                        //      wins if both copies were dirty.
+                        //   4. Execute the atomic RMW on DM.
+                        //   5. Return the pre-atomic value to the requester.
+                        //
+                        // Both caches are invalidated by this point: the
+                        // requester via release_for_atomic, the peer via
+                        // handle_snoop(BUS_ATOMIC, ...) done earlier.
+                        $
+                            statAtomicTransactions++;
+
+                            // Release the requester's own copy of the block
+                            if(grantedId == 0) {
+                                reqDirty = dcache0->release_for_atomic(
+                                    snoopAddr, reqD0, reqD1, reqD2, reqD3);
+                            }
+                            else {
+                                reqDirty = dcache1->release_for_atomic(
+                                    snoopAddr, reqD0, reqD1, reqD2, reqD3);
+                            }
+
+                            log << endl
+                                << "BUS ATOMIC core=" << grantedId
+                                << " word=" << grantedAddr
+                                << " block=" << snoopAddr
+                                << " reqDirty=" << reqDirty
+                                << " peerDirty=" << suppliedDirty
+                                << " cycle=" << current_time.cycle();
+
+                            if(reqDirty && suppliedDirty) {
+                                statBothDirty++;
+                                log << endl
+                                    << "BUS ATOMIC BOTH-DIRTY block=" << snoopAddr
+                                    << " (peer flushed first, requester last)"
+                                    << " cycle=" << current_time.cycle();
+                            }
+                        $;
+
+                        // Step 1: flush peer's dirty block to DM (if any).
+                        // This is the older copy, so it must land before the
+                        // requester's newer copy below.
+                        if(suppliedDirty) then
+                            $
+                                prepareMemStore(snoopAddr,
+                                    (BLOCK_SIZE == 4) ? WORD :
+                                    (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
+                                    snoopD0, snoopD1, snoopD2, snoopD3);
+                            $;
+
+                            do
+                                wait until(this_phase == 1);
+                                $ ok = dm_outp->push(requestToMemory); $;
+                                if(not ok) then wait end if;
+                            while(not ok) end do;
+
+                            do
+                                wait until(this_phase == 0);
+                                $ hasToken = dm_inp->peek(responseFromMemory); $;
+                                if(not hasToken) then wait end if;
+                            while(not hasToken) end do;
+
+                            $
+                                pulled = dm_inp->pull(responseFromMemory);
+                                sitar::unpack(responseFromMemory, responseErr,
+                                    responseData0, responseData1, responseData2, responseData3);
+                            $;
+                        end if;
+
+                        // Step 2: flush requester's dirty block to DM LAST so
+                        // its newer/authoritative data wins over any peer copy.
+                        if(reqDirty) then
+                            $
+                                prepareMemStore(snoopAddr,
+                                    (BLOCK_SIZE == 4) ? WORD :
+                                    (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
+                                    reqD0, reqD1, reqD2, reqD3);
+                            $;
+
+                            do
+                                wait until(this_phase == 1);
+                                $ ok = dm_outp->push(requestToMemory); $;
+                                if(not ok) then wait end if;
+                            while(not ok) end do;
+
+                            do
+                                wait until(this_phase == 0);
+                                $ hasToken = dm_inp->peek(responseFromMemory); $;
+                                if(not hasToken) then wait end if;
+                            while(not hasToken) end do;
+
+                            $
+                                pulled = dm_inp->pull(responseFromMemory);
+                                sitar::unpack(responseFromMemory, responseErr,
+                                    responseData0, responseData1, responseData2, responseData3);
+                            $;
+                        end if;
+
+                        // Step 3: execute atomic RMW on DM
+                        $
+                            prepareMemAtomic(grantedAddr, grantedSize);
+                        $;
+
+                        do
+                            wait until(this_phase == 1);
+                            $ ok = dm_outp->push(requestToMemory); $;
+                            if(not ok) then wait end if;
+                        while(not ok) end do;
+
+                        do
+                            wait until(this_phase == 0);
+                            $ hasToken = dm_inp->peek(responseFromMemory); $;
+                            if(not hasToken) then wait end if;
+                        while(not hasToken) end do;
+
+                        // Step 4: return pre-atomic value to requester
+                        $
+                            pulled = dm_inp->pull(responseFromMemory);
+                            sitar::unpack(responseFromMemory, responseErr,
+                                responseData0, responseData1, responseData2, responseData3);
+
+                            if(grantedId == 0) {
+                                *bus0_resp_err = responseErr;
+                                *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
+                                *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
+                                *bus0_resp_valid = true;
+                            }
+                            else {
+                                *bus1_resp_err = responseErr;
+                                *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
+                                *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
+                                *bus1_resp_valid = true;
+                            }
+                        $;
+
+                    end if;
+
+                end if;
+
+            end if;
+
+            end if;
+
+            end if;
+
+            // Invariant audit: if one dcache has a block in M, the other must
+            // have it in I (or absent). Icaches are read-only, so neither may
+            // ever hold a block in M. Skipped for WbEngine transactions since
+            // the owner's line is already INVALID.
+            $
+                if(!isWbRequest) {
+                    int s0 = dcache0->line_state(snoopAddr);
+                    int s1 = dcache1->line_state(snoopAddr);
+                    int i0 = icache0->line_state(snoopAddr);
+                    int i1 = icache1->line_state(snoopAddr);
+                    bool violation = false;
+                    if(s0 == 2 && s1 != 0 && s1 != -1) violation = true;
+                    if(s1 == 2 && s0 != 0 && s0 != -1) violation = true;
+                    if(i0 == 2 || i1 == 2) violation = true;
+                    if(violation) {
+                        statInvariantViolations++;
+                        log << endl
+                            << "INVARIANT VIOLATION block=" << snoopAddr
+                            << " c0_state=" << s0
+                            << " c1_state=" << s1
+                            << " i0_state=" << i0
+                            << " i1_state=" << i1
+                            << " cycle=" << current_time.cycle();
+                    }
+                }
+            $;
+
+            // The round-robin pointer is advanced at grant time, so no
+            // separate end-of-transaction toggle is required.
+
+            wait(1, 0);
+
+        while(1) end do;
+
+    end behavior
+
+end procedure
+
+
+
+// =====================================================================
+// DualCore: two processors with private L1 caches sharing data memory
+// through MSI coherence bus.
+// =====================================================================
+module DualCore
+
+    // Core 0
+    procedure proc0 : Processor<40, 30, 3, 1000, 100000, 16, 0>
+    procedure icache0 : Cache<4, 4, 16, 4, 1, 0, 0, 0>
+    procedure dcache0 : Cache<2, 8, 16, 4, 1, 0, 0, 1>
+    procedure dcache0_wb : WbEngine<16, 1>
+
+    // Core 1
+    procedure proc1 : Processor<40, 30, 3, 1000, 100000, 16, 1>
+    procedure icache1 : Cache<4, 4, 16, 4, 1, 0, 1, 0>
+    procedure dcache1 : Cache<2, 8, 16, 4, 1, 0, 1, 1>
+    procedure dcache1_wb : WbEngine<16, 1>
+
+    // Coherence bus
+    procedure bus : CoherenceBus<16, 2, 2, 8, 4, 1, 0>
+
+    // External ports (connected to Top)
+    inport im_inp : width 17
+    outport im_outp : width 22
+
+    inport dm_inp : width 17
+    outport dm_outp : width 22
+
+    decl $
+        bool proc0Done;
+        bool proc1Done;
+    $
+
+    init $
+
+        // Coherence bus <-> instruction memory port
+        bus.im_inp = &im_inp;
+        bus.im_outp = &im_outp;
+
+        // Coherence bus <-> data memory port
+        bus.dm_inp = &dm_inp;
+        bus.dm_outp = &dm_outp;
+
+        // Coherence bus <-> cache snoop targets
+        bus.dcache0 = &dcache0;
+        bus.dcache1 = &dcache1;
+        bus.icache0 = &icache0;
+        bus.icache1 = &icache1;
+
+        // Bus channels: DCache0 <-> bus
+        bus.bus0_req_valid = &dcache0.bus_req_valid;
+        bus.bus0_resp_valid = &dcache0.bus_resp_valid;
+        bus.bus0_req_cmd = &dcache0.bus_req_cmd;
+        bus.bus0_req_addr = &dcache0.bus_req_addr;
+        bus.bus0_req_size = &dcache0.bus_req_size;
+        bus.bus0_resp_err = &dcache0.bus_resp_err;
+        bus.bus0_resp_d0 = &dcache0.bus_resp_d0;
+        bus.bus0_resp_d1 = &dcache0.bus_resp_d1;
+        bus.bus0_resp_d2 = &dcache0.bus_resp_d2;
+        bus.bus0_resp_d3 = &dcache0.bus_resp_d3;
+
+        // Bus channels: DCache1 <-> bus
+        bus.bus1_req_valid = &dcache1.bus_req_valid;
+        bus.bus1_resp_valid = &dcache1.bus_resp_valid;
+        bus.bus1_req_cmd = &dcache1.bus_req_cmd;
+        bus.bus1_req_addr = &dcache1.bus_req_addr;
+        bus.bus1_req_size = &dcache1.bus_req_size;
+        bus.bus1_resp_err = &dcache1.bus_resp_err;
+        bus.bus1_resp_d0 = &dcache1.bus_resp_d0;
+        bus.bus1_resp_d1 = &dcache1.bus_resp_d1;
+        bus.bus1_resp_d2 = &dcache1.bus_resp_d2;
+        bus.bus1_resp_d3 = &dcache1.bus_resp_d3;
+
+        // Bus channels: ICache0 <-> bus
+        bus.bus_ic0_req_valid = &icache0.bus_req_valid;
+        bus.bus_ic0_resp_valid = &icache0.bus_resp_valid;
+        bus.bus_ic0_req_cmd = &icache0.bus_req_cmd;
+        bus.bus_ic0_req_addr = &icache0.bus_req_addr;
+        bus.bus_ic0_req_size = &icache0.bus_req_size;
+        bus.bus_ic0_resp_err = &icache0.bus_resp_err;
+        bus.bus_ic0_resp_d0 = &icache0.bus_resp_d0;
+        bus.bus_ic0_resp_d1 = &icache0.bus_resp_d1;
+        bus.bus_ic0_resp_d2 = &icache0.bus_resp_d2;
+        bus.bus_ic0_resp_d3 = &icache0.bus_resp_d3;
+
+        // Bus channels: ICache1 <-> bus
+        bus.bus_ic1_req_valid = &icache1.bus_req_valid;
+        bus.bus_ic1_resp_valid = &icache1.bus_resp_valid;
+        bus.bus_ic1_req_cmd = &icache1.bus_req_cmd;
+        bus.bus_ic1_req_addr = &icache1.bus_req_addr;
+        bus.bus_ic1_req_size = &icache1.bus_req_size;
+        bus.bus_ic1_resp_err = &icache1.bus_resp_err;
+        bus.bus_ic1_resp_d0 = &icache1.bus_resp_d0;
+        bus.bus_ic1_resp_d1 = &icache1.bus_resp_d1;
+        bus.bus_ic1_resp_d2 = &icache1.bus_resp_d2;
+        bus.bus_ic1_resp_d3 = &icache1.bus_resp_d3;
+
+        // WbEngine bus channels for dcache write-backs through coherence bus
+        bus.wb0_bus_req_valid = &dcache0.wb_bus_req_valid;
+        bus.wb0_bus_resp_valid = &dcache0.wb_bus_resp_valid;
+        bus.wb0_bus_addr = &dcache0.wb_bus_addr;
+        bus.wb0_bus_size = &dcache0.wb_bus_size;
+        bus.wb0_bus_d0 = &dcache0.wb_bus_d0;
+        bus.wb0_bus_d1 = &dcache0.wb_bus_d1;
+        bus.wb0_bus_d2 = &dcache0.wb_bus_d2;
+        bus.wb0_bus_d3 = &dcache0.wb_bus_d3;
+        bus.wb0_bus_err = &dcache0.wb_bus_err;
+
+        bus.wb1_bus_req_valid = &dcache1.wb_bus_req_valid;
+        bus.wb1_bus_resp_valid = &dcache1.wb_bus_resp_valid;
+        bus.wb1_bus_addr = &dcache1.wb_bus_addr;
+        bus.wb1_bus_size = &dcache1.wb_bus_size;
+        bus.wb1_bus_d0 = &dcache1.wb_bus_d0;
+        bus.wb1_bus_d1 = &dcache1.wb_bus_d1;
+        bus.wb1_bus_d2 = &dcache1.wb_bus_d2;
+        bus.wb1_bus_d3 = &dcache1.wb_bus_d3;
+        bus.wb1_bus_err = &dcache1.wb_bus_err;
+
+        // Processor <-> ICache0
+        proc0.ic_req_valid = &icache0.req_valid;
+        proc0.ic_resp_valid = &icache0.resp_valid;
+        proc0.ic_req_addr = &icache0.req_addr;
+        proc0.ic_req_type = &icache0.req_type;
+        proc0.ic_req_size = &icache0.req_size;
+        proc0.ic_resp_err = &icache0.resp_err;
+        proc0.ic_resp_data0 = &icache0.resp_data0;
+        proc0.ic_resp_data1 = &icache0.resp_data1;
+        proc0.ic_resp_data2 = &icache0.resp_data2;
+        proc0.ic_resp_data3 = &icache0.resp_data3;
+
+        // Processor <-> DCache0
+        proc0.dc_req_valid = &dcache0.req_valid;
+        proc0.dc_resp_valid = &dcache0.resp_valid;
+        proc0.dc_req_addr = &dcache0.req_addr;
+        proc0.dc_req_type = &dcache0.req_type;
+        proc0.dc_req_size = &dcache0.req_size;
+        proc0.dc_resp_err = &dcache0.resp_err;
+        proc0.dc_resp_data0 = &dcache0.resp_data0;
+        proc0.dc_resp_data1 = &dcache0.resp_data1;
+        proc0.dc_resp_data2 = &dcache0.resp_data2;
+        proc0.dc_resp_data3 = &dcache0.resp_data3;
+
+        // Processor <-> ICache1
+        proc1.ic_req_valid = &icache1.req_valid;
+        proc1.ic_resp_valid = &icache1.resp_valid;
+        proc1.ic_req_addr = &icache1.req_addr;
+        proc1.ic_req_type = &icache1.req_type;
+        proc1.ic_req_size = &icache1.req_size;
+        proc1.ic_resp_err = &icache1.resp_err;
+        proc1.ic_resp_data0 = &icache1.resp_data0;
+        proc1.ic_resp_data1 = &icache1.resp_data1;
+        proc1.ic_resp_data2 = &icache1.resp_data2;
+        proc1.ic_resp_data3 = &icache1.resp_data3;
+
+        // Processor <-> DCache1
+        proc1.dc_req_valid = &dcache1.req_valid;
+        proc1.dc_resp_valid = &dcache1.resp_valid;
+        proc1.dc_req_addr = &dcache1.req_addr;
+        proc1.dc_req_type = &dcache1.req_type;
+        proc1.dc_req_size = &dcache1.req_size;
+        proc1.dc_resp_err = &dcache1.resp_err;
+        proc1.dc_resp_data0 = &dcache1.resp_data0;
+        proc1.dc_resp_data1 = &dcache1.resp_data1;
+        proc1.dc_resp_data2 = &dcache1.resp_data2;
+        proc1.dc_resp_data3 = &dcache1.resp_data3;
+
+        // Coordinated stop
+        proc0.my_done = &proc0Done;
+        proc0.peer_done = &proc1Done;
+        proc1.my_done = &proc1Done;
+        proc1.peer_done = &proc0Done;
+
+        proc0Done = false;
+        proc1Done = false;
+
+        // DCache write-back engines (use bus, USE_BUS=1)
+        dcache0_wb.wb_pending = &dcache0.wbPending;
+        dcache0_wb.mem_busy = &dcache0.memBusy;
+        dcache0_wb.fe_waiting = &dcache0.feWaiting;
+        dcache0_wb.wb_block_addr = &dcache0.wbBlockAddr;
+        dcache0_wb.wb_size = &dcache0.wbSize;
+        dcache0_wb.wb_d0 = &dcache0.wbData0;
+        dcache0_wb.wb_d1 = &dcache0.wbData1;
+        dcache0_wb.wb_d2 = &dcache0.wbData2;
+        dcache0_wb.wb_d3 = &dcache0.wbData3;
+        dcache0_wb.wb_done_cnt = &dcache0.statWbDone;
+        dcache0_wb.wb_wait_total = &dcache0.statWbWaitTotal;
+        dcache0_wb.wb_wait_max = &dcache0.statWbWaitMax;
+        dcache0_wb.wb_bus_req_valid = &dcache0.wb_bus_req_valid;
+        dcache0_wb.wb_bus_resp_valid = &dcache0.wb_bus_resp_valid;
+        dcache0_wb.wb_bus_addr = &dcache0.wb_bus_addr;
+        dcache0_wb.wb_bus_size = &dcache0.wb_bus_size;
+        dcache0_wb.wb_bus_d0 = &dcache0.wb_bus_d0;
+        dcache0_wb.wb_bus_d1 = &dcache0.wb_bus_d1;
+        dcache0_wb.wb_bus_d2 = &dcache0.wb_bus_d2;
+        dcache0_wb.wb_bus_d3 = &dcache0.wb_bus_d3;
+        dcache0_wb.wb_bus_err = &dcache0.wb_bus_err;
+
+        dcache1_wb.wb_pending = &dcache1.wbPending;
+        dcache1_wb.mem_busy = &dcache1.memBusy;
+        dcache1_wb.fe_waiting = &dcache1.feWaiting;
+        dcache1_wb.wb_block_addr = &dcache1.wbBlockAddr;
+        dcache1_wb.wb_size = &dcache1.wbSize;
+        dcache1_wb.wb_d0 = &dcache1.wbData0;
+        dcache1_wb.wb_d1 = &dcache1.wbData1;
+        dcache1_wb.wb_d2 = &dcache1.wbData2;
+        dcache1_wb.wb_d3 = &dcache1.wbData3;
+        dcache1_wb.wb_done_cnt = &dcache1.statWbDone;
+        dcache1_wb.wb_wait_total = &dcache1.statWbWaitTotal;
+        dcache1_wb.wb_wait_max = &dcache1.statWbWaitMax;
+        dcache1_wb.wb_bus_req_valid = &dcache1.wb_bus_req_valid;
+        dcache1_wb.wb_bus_resp_valid = &dcache1.wb_bus_resp_valid;
+        dcache1_wb.wb_bus_addr = &dcache1.wb_bus_addr;
+        dcache1_wb.wb_bus_size = &dcache1.wb_bus_size;
+        dcache1_wb.wb_bus_d0 = &dcache1.wb_bus_d0;
+        dcache1_wb.wb_bus_d1 = &dcache1.wb_bus_d1;
+        dcache1_wb.wb_bus_d2 = &dcache1.wb_bus_d2;
+        dcache1_wb.wb_bus_d3 = &dcache1.wb_bus_d3;
+        dcache1_wb.wb_bus_err = &dcache1.wb_bus_err;
+
+    $
+
+    behavior
+
+        [
+            run proc0
+            ||
+            run proc1
+            ||
+            run icache0
+            ||
+            run icache1
+            ||
+            run dcache0
+            ||
+            run dcache1
+            ||
+            run dcache0_wb
+            ||
+            run dcache1_wb
+            ||
+            run bus
+        ];
+
+    end behavior
+
+end module
+
+
+
+// Memory module (blocking: one request at a time)
+module Memory
+
+    parameter int MEMORY_DELAY = 40
+
+    inport inp : width 22
+    outport outp : width 17
+
+
+    include $#include <cstdlib>$
+    include $#include <vector>$
+    include $#include <cstdint>$
+
+
+    decl $
+
+        enum MemOpType {
+            IFETCH = 0,
+            LOAD = 1,
+            STORE = 2,
+            ATOMICLOADSTORE = 3
+        };
+
+        enum MemSize {
+            WORD = 0,
+            DOUBLEWORD = 1,
+            QUADWORD = 2
+        };
+
+
+        std::vector<uint8_t> mem;
+
+        int memDelay;
+
+        token<22> requestFromCache;
+        token<17> responseToCache;
+
+        uint32_t requestAddr;
+
+        uint8_t requestType;
+        uint8_t requestSize;
+
+        uint32_t reqData0;
+        uint32_t reqData1;
+        uint32_t reqData2;
+        uint32_t reqData3;
+
+        uint8_t responseErr;
+
+        uint32_t responseData0;
+        uint32_t responseData1;
+        uint32_t responseData2;
+        uint32_t responseData3;
+
+
+        bool pulled;
+        bool ok;
+        bool hasToken;
+
+        int getSizeBytes(int size) {
+            if(size == WORD) return 4;
+            if(size == DOUBLEWORD) return 8;
+            return 16;
+        }
+
+        bool isAligned(uint32_t addr, int size) {
+            if(size == WORD) return (addr & 3) == 0;
+            if(size == DOUBLEWORD) return (addr & 7) == 0;
+            return (addr & 15) == 0;
+        }
+
+        void read_memory(uint32_t addr, int size) {
+            responseData0 = 0; responseData1 = 0;
+            responseData2 = 0; responseData3 = 0;
+            uint32_t d[4] = {0, 0, 0, 0};
+            int bytes = getSizeBytes(size);
+            for(int i = 0; i < bytes / 4; i++) {
+                int k = addr + i * 4;
+                d[i] =
+                    ((uint32_t)mem[k] << 24) |
+                    ((uint32_t)mem[k+1] << 16) |
+                    ((uint32_t)mem[k+2] << 8) |
+                    ((uint32_t)mem[k+3]);
+            }
+            responseData0 = d[0]; responseData1 = d[1];
+            responseData2 = d[2]; responseData3 = d[3];
+        }
+
+        void write_word(uint32_t addr, uint32_t data) {
+            mem[addr] = (data >> 24) & 0xff;
+            mem[addr+1] = (data >> 16) & 0xff;
+            mem[addr+2] = (data >> 8) & 0xff;
+            mem[addr+3] = data & 0xff;
+        }
+
+        void write_block(uint32_t addr, int size) {
+            uint32_t d[4] = { reqData0, reqData1, reqData2, reqData3 };
+            int bytes = getSizeBytes(size);
+            for(int i = 0; i < bytes / 4; i++) {
+                int k = addr + i * 4;
+                mem[k] = (d[i] >> 24) & 0xff;
+                mem[k+1] = (d[i] >> 16) & 0xff;
+                mem[k+2] = (d[i] >> 8) & 0xff;
+                mem[k+3] = d[i] & 0xff;
+            }
+        }
+
+    $
+
+
+    init $
+
+        mem.resize(1024);
+        for(int i = 0; i < 1024; i++)
+            mem[i] = i & 0xff;
+
+        memDelay = MEMORY_DELAY;
+        if(const char* e = std::getenv("MEMORY_DELAY"))
+            memDelay = std::atoi(e);
+
+    $
+
+
+    behavior
+
+        do
+
+            wait until(this_phase == 0);
+
+            $
+                hasToken = inp.peek(requestFromCache);
+            $;
+
+            if(not hasToken) then
+                wait
+            end if;
+
+            if(hasToken) then
+
+                $
+                    pulled = inp.pull(requestFromCache);
+                    sitar::unpack(requestFromCache,
+                        requestAddr, requestType, requestSize,
+                        reqData0, reqData1, reqData2, reqData3);
+
+                    responseData0 = 0; responseData1 = 0;
+                    responseData2 = 0; responseData3 = 0;
+                    responseErr = 0;
+
+                    int bytes = getSizeBytes(requestSize);
+
+                    if(requestAddr + bytes > 1024) {
+                        responseErr = 1;
+                        log << endl << "Memory: OUT OF BOUNDS Addr=" << requestAddr;
+                    }
+                    else if(!isAligned(requestAddr, requestSize)) {
+                        responseErr = 2;
+                        log << endl << "Memory: ALIGNMENT ERROR Addr=" << requestAddr;
+                    }
+                    else {
+                        if(requestType == IFETCH || requestType == LOAD) {
+                            read_memory(requestAddr, requestSize);
+                        }
+                        else if(requestType == STORE) {
+                            write_block(requestAddr, requestSize);
+                        }
+                        else if(requestType == ATOMICLOADSTORE) {
+                            read_memory(requestAddr, requestSize);
+                            log << endl
+                                << "MEM ATOMIC addr=" << requestAddr
+                                << " size=" << (int)requestSize
+                                << " old0=" << responseData0
+                                << " old1=" << responseData1
+                                << " old2=" << responseData2
+                                << " old3=" << responseData3
+                                << " cycle=" << current_time.cycle();
+                            write_word(requestAddr, 0x11223344);
+                        }
+                    }
+                $;
+
+                wait(memDelay, 0);
+
+                $
+                    sitar::pack(responseToCache,
+                        responseErr,
+                        responseData0, responseData1, responseData2, responseData3);
+                $;
+
+                do
+                    wait until(this_phase == 1);
+                    $ ok = outp.push(responseToCache); $;
+                    if(not ok) then wait end if;
+                while(not ok) end do;
+
+            end if;
+
+        while(1) end do;
+
+    end behavior
+
+end module
