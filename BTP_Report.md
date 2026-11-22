@@ -12,11 +12,11 @@
 
 **Source snapshot:** `/home/sidd64/Sitar_Assignment_1/model.sitar`
 
-**Model SHA-256:** `74dc5f8b1e6ccccfc58b954a66a1e8bda3224ff242ddc82dcd0202a4b83ca970`
+**Model SHA-256:** `3b9cd995535da5ae837f219e84810f013164661ac2b94a82290fc86a2a463c0e`
 
 **Repository base commit:** `34795b3`
 
-**Primary result snapshot:** `reports/run_20261121_141027`, also available through `reports/latest`
+**Primary result snapshot:** `reports/run_20261122_152018`, also available through `reports/latest`
 
 **Report date:** 21 November 2026
 
@@ -173,13 +173,13 @@ implementation:
 | Objective | Requirement | Evidence |
 | --- | --- | --- |
 | Dual-core execution | Both cores complete 1,000 instructions | `RESULT instructions=1000` in every scenario |
-| Private split caches | Separate icache and dcache per core | `DualCore` instantiations at `model.sitar:3201-3210` |
-| Data MSI coherence | At most one modified dcache copy; no stale valid shared copy | Bus invariant audit at `model.sitar:3154-3180`; zero violations |
-| Instruction coherence | Peer icache snooped on every instruction fetch | Bus peer-snoop path at `model.sitar:2679-2703`; static checks pass |
-| Coherent atomics | Atomic RMW returns the pre-atomic value and invalidates both dcache copies | `BUS_ATOMIC` path at `model.sitar:2999-3151`; zero mismatches |
-| Fair arbitration | No fixed priority across six bus requesters | Six-way round-robin at `model.sitar:2586-2640` |
-| Write-back support | Dirty dcache evictions drain through two WB engines | Bus write-back path at `model.sitar:2294-2353` |
-| Reproducibility | Deterministic address streams where required | `DET_RNG` per-core LCG at `model.sitar:96-102`, `278-281` |
+| Private split caches | Separate icache and dcache per core | `DualCore` instantiations |
+| Data MSI coherence | At most one modified dcache copy; no stale valid shared copy | Bus invariant audit; zero violations |
+| Instruction coherence | Peer icache snooped on every instruction fetch | Bus peer-snoop path; static checks pass |
+| Coherent atomics | Atomic RMW returns the pre-atomic value and invalidates both dcache copies | `BUS_ATOMIC` path; zero mismatches |
+| Fair arbitration | No fixed priority across six bus requesters | Six-way round-robin |
+| Write-back support | Dirty dcache evictions drain through two WB engines | Bus write-back path |
+| Reproducibility | Deterministic address streams where required | `DET_RNG` per-core LCG |
 | Automated validation | Repeatable pass/fail and metrics | `test/` suite and `reports/latest` |
 
 ### 4.3 Non-Functional Objectives
@@ -317,8 +317,7 @@ The coherence domain is exactly `{dcache0, dcache1, DM}`. The invariant is:
 - both data caches may hold the block in `SHARED`;
 - `INVALID` or absent means no usable copy.
 
-The bus checks this invariant after every non-write-back transaction at
-`model.sitar:3154-3180`. The instruction caches are no longer outside this domain: they
+The bus checks this invariant after every non-write-back transaction. The instruction caches are no longer outside this domain: they
 are snooped, but because they are read-only, the audit only checks that neither holds a
 modified line.
 
@@ -344,8 +343,7 @@ modified line.
 | `WRITE_POLICY` | 0 | Default write-back with write allocate |
 | `DET_RNG` | 1 in test suite | Per-core deterministic address streams |
 
-The top-level nets are one-entry, 22-byte request nets and 17-byte response nets
-(`model.sitar:6-10`).
+The top-level nets are one-entry, 22-byte request nets and 17-byte response nets.
 
 ---
 
@@ -365,7 +363,7 @@ topology simple and makes the coherence domain explicit.
 
 ### 6.2 Processor
 
-The `Processor` procedure (`model.sitar:25-722`) is a synthetic single-issue workload
+The `Processor` procedure is a synthetic single-issue workload
 generator. Each iteration performs an instruction fetch and then, depending on the
 configured probabilities, a data operation.
 
@@ -379,7 +377,7 @@ configured probabilities, a data operation.
 - Load and store sizes are chosen uniformly from word, doubleword, and quadword.
 - Atomics are always word-sized.
 
-Address generation (`model.sitar:144-180`) uses an 8-entry history and a 1,024-byte
+Address generation uses an 8-entry history and a 1,024-byte
 address space:
 
 1. With probability `SPATIAL_LOCALITY` (default 0.6), choose a word within the same
@@ -399,11 +397,11 @@ A/B comparisons.
 After 1,000 instructions, or when `MAX_TIME` is reached, the processor stops issuing
 work. It then sends sentinel requests (`0xFFFFFFFF`) to the instruction and data
 caches to collect statistics. It sets its completion flag and waits for the peer core
-before stopping the simulation (`model.sitar:617-718`).
+before stopping the simulation.
 
 ### 6.3 Cache
 
-The `Cache` procedure (`model.sitar:731-2165`) is a parameterized set-associative
+The `Cache` procedure is a parameterized set-associative
 cache. It is instantiated four times with different geometry, core ID, and
 instruction/data role.
 
@@ -430,7 +428,7 @@ set    = floor(address / B) mod S
 tag    = floor(address / (B * S))
 ```
 
-This is implemented at `model.sitar:978-988`.
+This is implemented in the cache address helpers.
 
 #### Hit and Miss Behavior
 
@@ -472,7 +470,7 @@ buffer.
 
 #### Snoop Handling
 
-`handle_snoop()` (`model.sitar:1012-1138`) is called by the bus while the cache may be
+`handle_snoop()` is called by the bus while the cache may be
 waiting between a bus response and the front-end response. It handles:
 
 | Snoop command | Peer line state | Action |
@@ -499,22 +497,21 @@ peer holds the block in `SHARED`; the request still fetches from `IM`.
 
 After computing a response, the cache saves `responseErr` and `responseData0..3` into
 `savedResponse*`, waits `CACHE_DELAY` cycles, and then sends the saved values to the
-processor (`model.sitar:2132-2154`). This prevents a snoop that runs during the delay
+processor. This prevents a snoop that runs during the delay
 window from overwriting the value that the processor is about to receive. The saved-
 response path is a direct fix for a real class of response-corruption bugs.
 
 #### Instruction-Cache Path Note
 
-The source comment at `model.sitar:728-729` says the instruction cache uses direct
-memory access. The executable behavior is different: the instruction-cache miss path
-issues `BUS_RD` through the coherence bus (`model.sitar:1995-2026`), and the bus
-forwards the request to `IM` (`model.sitar:2876-2927`). The behavior is authoritative
+A source comment says the instruction cache uses direct memory access. The executable
+behavior is different: the instruction-cache miss path issues `BUS_RD` through the
+coherence bus, and the bus forwards the request to `IM`. The behavior is authoritative
 for this report. The instruction cache is bus-mediated and peer-snooped; because it
 has no store path, its peer snoop can only confirm a `SHARED` copy.
 
 ### 6.4 Write-Back Engine
 
-`WbEngine` (`model.sitar:2172-2361`) drains a data cache's one-entry write buffer. The
+`WbEngine` drains a data cache's one-entry write buffer. The
 final design instantiates only the bus-mode engines:
 
 | Mode | Instantiation | Path |
@@ -536,7 +533,7 @@ simple but means the cache must remain aware of the buffer during snoops.
 
 ### 6.5 Coherence Bus
 
-`CoherenceBus` (`model.sitar:2369-3190`) is the serialization point. It owns:
+`CoherenceBus` is the serialization point. It owns:
 
 - six requester channels: `dcache0`, `dcache1`, `icache0`, `icache1`, `wb0`, `wb1`;
 - four typed cache pointers: two dcache snoop targets and two icache snoop targets;
@@ -563,8 +560,8 @@ slot 4 = wb0
 slot 5 = wb1
 ```
 
-It grants the first pending requester, then advances `rrPtr` past the granted slot
-(`model.sitar:2586-2640`). No requester has a fixed priority. This removes the
+It grants the first pending requester, then advances `rrPtr` past the granted slot.
+No requester has a fixed priority. This removes the
 starvation hazards of a fixed dcache-first or front-end-first policy.
 
 #### Snooping and Memory
@@ -588,12 +585,12 @@ instruction/data coherence dependency.
 After each non-write-back transaction, the bus queries both dcache and both icache line
 states for the requested block. If one dcache is `MODIFIED` and the other is valid, or
 if either icache is `MODIFIED`, it increments `statInvariantViolations` and logs
-`INVARIANT VIOLATION` (`model.sitar:3154-3180`). This is a runtime assertion embedded
+`INVARIANT VIOLATION`. This is a runtime assertion embedded
 in the simulation, not only a post-processing check.
 
 ### 6.6 Dual-Core Integration
 
-`DualCore` (`model.sitar:3198-3440`) is the structural and wiring module for the two
+`DualCore` is the structural and wiring module for the two
 cores. The exact instantiations are:
 
 ```text
@@ -677,7 +674,7 @@ flowchart TB
 
 ### 6.7 Memory
 
-`Memory` (`model.sitar:3445-3645`) is a single-request, blocking memory with a
+`Memory` is a single-request, blocking memory with a
 parameterized delay. The key details are:
 
 - 1,024 bytes of storage;
@@ -698,7 +695,7 @@ The memory checks bounds and alignment before servicing a request:
 
 For `IFETCH` and `LOAD`, it reads the requested bytes. For `STORE`, it writes the
 supplied block. For `ATOMICLOADSTORE`, it reads the old value, logs it, and writes
-`0x11223344` to the addressed word (`model.sitar:3610-3620`). The old value is
+`0x11223344` to the addressed word. The old value is
 returned to the requester. The memory operation is serialized by the bus, so an atomic
 cannot interleave with another memory transaction.
 
@@ -778,8 +775,7 @@ The bus and write-back engines follow the complementary phase discipline: push i
 phase 1, peek in phase 0. A capacity-1 net means the producer must wait if the
 consumer has not drained the previous token.
 
-This phase discipline is visible in the memory behavior (`model.sitar:3567-3643`) and
-in the bus memory accesses (`model.sitar:2748-2775`, `2816-2838`, `2876-2927`).
+This phase discipline is visible in the memory behavior and in the bus memory accesses.
 
 ### 7.5 Write-Back Engine Handshake
 
@@ -1009,7 +1005,7 @@ A race is possible: while the upgrade is queued, the peer may issue its own excl
 request and invalidate this cache's line. To recover, the cache re-checks after the
 grant. If the line is gone, it converts the operation into a `BUS_RDX` miss, installs
 the block as `MODIFIED`, applies the store, and accounts for the missed upgrade. This
-recovery path is at `model.sitar:1749-1826`.
+recovery path is implemented in the store-hit flow.
 
 ### 8.7 Atomic Read-Modify-Write
 
@@ -1111,7 +1107,7 @@ The cache may be snooped while it is waiting `CACHE_DELAY` cycles before respond
 its processor. A naive implementation would let the snoop overwrite the response
 registers, corrupting the processor's data. The cache avoids this by saving the
 response fields before the delay and sending the saved fields afterward
-(`model.sitar:2132-2154`). The current validation suite finds zero atomic old-value
+. The current validation suite finds zero atomic old-value
 mismatches and zero data errors.
 
 ---
@@ -1378,7 +1374,7 @@ not silent substitutions.
 
 ### 12.1 Overall Results
 
-The latest run is `reports/run_20261121_141027`. All 18 scenarios pass.
+The latest run is `reports/run_20261122_152018`. All 18 scenarios pass.
 
 | Scenario | Cycles | IPC | IC hit | DC hit | Atomics | Coherence/1k |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -1798,40 +1794,17 @@ verification, and trace-driven evaluation.
 
 ## 18. Appendix
 
-### 18.1 Source Map
+### 18.1 Component Map
 
-| Component | Source range | Key content |
-| --- | --- | --- |
-| `Top` | `model.sitar:1-21` | Memory and dual-core wiring |
-| `Processor` | `model.sitar:25-722` | Workload generation, address locality, completion |
-| `Cache` | `model.sitar:731-2165` | Set-associative cache, MSI, peer snoops, write buffer |
-| `WbEngine` | `model.sitar:2172-2361` | Bus write-back path |
-| `CoherenceBus` | `model.sitar:2369-3190` | Arbitration, snooping, memory serialization, invariant audit |
-| `DualCore` | `model.sitar:3198-3440` | Instantiation and wiring |
-| `Memory` | `model.sitar:3445-3645` | 1 KiB memory, delay, atomics, errors |
-
-Important line-level references:
-
-- Processor request generation: `model.sitar:323-338`, `395-597`
-- Address locality: `model.sitar:144-180`
-- Cache address mapping: `model.sitar:978-988`
-- Snoop handling: `model.sitar:1012-1138`
-- Atomic release: `model.sitar:1145-1176`
-- Replacement policy: `model.sitar:1300-1343`
-- Cache atomic path: `model.sitar:1573-1681`
-- Upgrade recovery: `model.sitar:1749-1826`
-- Saved response before `CACHE_DELAY`: `model.sitar:2132-2154`
-- Write-back bus path: `model.sitar:2294-2353`
-- Six-way arbitration: `model.sitar:2586-2640`
-- Snoop execution: `model.sitar:2679-2703`
-- `BUS_WB` execution: `model.sitar:2748-2775`
-- `BUS_UPGR`: `model.sitar:2784-2806`
-- `BUS_RD`: `model.sitar:2810-2927`
-- `BUS_RDX`: `model.sitar:2933-2995`
-- `BUS_ATOMIC`: `model.sitar:2999-3151`
-- Invariant audit: `model.sitar:3154-3180`
-- Memory initialization: `model.sitar:3558-3560`
-- Memory atomic: `model.sitar:3610-3620`
+| Component | Key content |
+| --- | --- |
+| `Top` | Memory and dual-core wiring |
+| `Processor` | Workload generation, address locality, completion |
+| `Cache` | Set-associative cache, MSI, peer snoops, write buffer |
+| `WbEngine` | Bus write-back path |
+| `CoherenceBus` | Arbitration, snooping, memory serialization, invariant audit |
+| `DualCore` | Instantiation and wiring |
+| `Memory` | 1 KiB memory, delay, atomics, errors |
 
 ### 18.2 Token Summary
 
@@ -1908,7 +1881,7 @@ from the default are:
 
 ### 18.6 Reproduction Checklist
 
-1. Confirm the model hash matches `74dc5f8b1e6ccccfc58b954a66a1e8bda3224ff242ddc82dcd0202a4b83ca970`.
+1. Confirm the model hash matches `3b9cd995535da5ae837f219e84810f013164661ac2b94a82290fc86a2a463c0e`.
 2. Build with `python3 test/run_tests.py --build`.
 3. Confirm `reports/latest/summary.md` reports 18 PASS and 0 failures.
 4. Confirm `reports/latest/results.csv` contains the cycle values reported here.

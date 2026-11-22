@@ -4,7 +4,7 @@
 	//======================================
 	//file CoherenceBus.h                                                  
 	//Describes procedure CoherenceBus                                      
-	//Auto-generated from input file "/home/sidd64/Sitar_Assignment_1/model.sitar" on 2026-11-21 at time 14:10:27   
+	//Auto-generated from input file "/home/sidd64/Sitar_Assignment_1/model.sitar" on 2026-11-22 at time 15:20:18   
 	 //(This design unit is parameterized. Generating code into a .h file only) 
 	
 	//======================================
@@ -16,15 +16,15 @@
 	#include"sitar_time.h"
 	//user included files
 	 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2379 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2315 ----
 #include <cstdlib>
 //----end code block-------
 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2380 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2316 ----
 #include <cstdint>
 //----end code block-------
 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2381 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2317 ----
 #include "Cache.h"
 //----end code block-------
 
@@ -61,7 +61,7 @@
 			//other declarations
 			public:
 			 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2383 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2319 ----
 
 
         enum MemOpType { IFETCH = 0, LOAD = 1, STORE = 2, ATOMICLOADSTORE = 3 };
@@ -259,7 +259,7 @@
 		_reexecute=0;
 	
 		 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2555 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2491 ----
 
         rrPtr = 0;
         statTotalTransactions = 0;
@@ -351,7 +351,7 @@ switch(_pointer[0])
 
 case 0 :
 {
-//do-while statement , line:2568
+//do-while statement , line:2504
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -361,7 +361,7 @@ switch(_pointer[1])
 
 case 0 :
 {
-//do-while statement , line:2571
+//do-while statement , line:2507
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -373,7 +373,7 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2572 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2508 ----
 
                     anyRequest =
                         ((*bus0_req_valid) && (!(*bus0_resp_valid))) ||
@@ -391,7 +391,7 @@ case 0:
 case 1:
 {
 
-//if statement , line:2581
+//if statement , line:2517
 if((((!((anyRequest))))))
 _if_flag[0]=true;
 else
@@ -411,7 +411,7 @@ switch(_pointer[3])
 case 0:
 {
 
-//wait statement , line:2581
+//wait statement , line:2517
 _timer[0] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(3);
 }
@@ -469,7 +469,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2571 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2507 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[2]=0;                                                               
 		_incrementPointer(1);                                                                    
 	}                                                                                              
@@ -489,7 +489,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2589 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2525 ----
 
                 grantedId = -1;
                 grantedIsIcache = false;
@@ -627,7 +627,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:2722
+//if statement , line:2658
 if((((((isWbRequest))))))
 _if_flag[1]=true;
 else
@@ -648,7 +648,7 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2724 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2660 ----
 
                     if(wbId == 0) {
                         wbReqAddr = *wb0_bus_addr;
@@ -681,7 +681,7 @@ case 0:
 
 case 1 :
 {
-//do-while statement , line:2750
+//do-while statement , line:2686
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -692,7 +692,7 @@ switch(_pointer[5])
 case 0:
 {
 
-//wait-until statement , line:2751
+//wait-until statement , line:2687
 if(((((((current_time.phase()))==(1))))))
  _incrementPointer(5);
 else
@@ -702,7 +702,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2752 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2688 ----
  ok = dm_outp->push(requestToMemory); 
 //----end code block-------
 
@@ -712,7 +712,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:2753
+//if statement , line:2689
 if((((!((ok))))))
 _if_flag[2]=true;
 else
@@ -732,7 +732,7 @@ switch(_pointer[6])
 case 0:
 {
 
-//wait statement , line:2753
+//wait statement , line:2689
 _timer[1] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(6);
 }
@@ -790,7 +790,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2750 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2686 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[5]=0;                                                               
 		_incrementPointer(4);                                                                    
 	}                                                                                              
@@ -808,7 +808,7 @@ else break; //sequence has terminated
 };                                                                                                   
 case 2 :
 {
-//do-while statement , line:2756
+//do-while statement , line:2692
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -819,7 +819,7 @@ switch(_pointer[7])
 case 0:
 {
 
-//wait-until statement , line:2757
+//wait-until statement , line:2693
 if(((((((current_time.phase()))==(0))))))
  _incrementPointer(7);
 else
@@ -829,7 +829,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2758 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2694 ----
  hasToken = dm_inp->peek(responseFromMemory); 
 //----end code block-------
 
@@ -839,7 +839,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:2759
+//if statement , line:2695
 if((((!((hasToken))))))
 _if_flag[3]=true;
 else
@@ -859,7 +859,7 @@ switch(_pointer[8])
 case 0:
 {
 
-//wait statement , line:2759
+//wait statement , line:2695
 _timer[2] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(8);
 }
@@ -917,7 +917,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2756 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2692 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[7]=0;                                                               
 		_incrementPointer(4);                                                                    
 	}                                                                                              
@@ -937,7 +937,7 @@ case 3:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2762 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2698 ----
 
                     pulled = dm_inp->pull(responseFromMemory);
                     sitar::unpack(responseFromMemory, responseErr,
@@ -975,7 +975,7 @@ switch(_pointer[9])
 case 0:
 {
 
-//if statement , line:2784
+//if statement , line:2720
 if((((((grantedCmd)==(BUS_UPGR))))))
 _if_flag[4]=true;
 else
@@ -996,10 +996,10 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2787 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2723 ----
 
-                    statUpgrTransactions++;
-                
+                        statUpgrTransactions++;
+                    
 //----end code block-------
 
  _incrementPointer(10);
@@ -1008,7 +1008,7 @@ case 0:
 case 1:
 {
 
-//wait-for -time statement , line:2791
+//wait-for -time statement , line:2727
 _timer[3] = sitar::time(current_time)+sitar::time(((BUS_SNOOP_DELAY)),((0)));
  _incrementPointer(10);
 }
@@ -1024,21 +1024,21 @@ case 3:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2793 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2729 ----
 
-                    if(grantedId == 0) {
-                        *bus0_resp_err = 0;
-                        *bus0_resp_d0 = 0; *bus0_resp_d1 = 0;
-                        *bus0_resp_d2 = 0; *bus0_resp_d3 = 0;
-                        *bus0_resp_valid = true;
-                    }
-                    else {
-                        *bus1_resp_err = 0;
-                        *bus1_resp_d0 = 0; *bus1_resp_d1 = 0;
-                        *bus1_resp_d2 = 0; *bus1_resp_d3 = 0;
-                        *bus1_resp_valid = true;
-                    }
-                
+                        if(grantedId == 0) {
+                            *bus0_resp_err = 0;
+                            *bus0_resp_d0 = 0; *bus0_resp_d1 = 0;
+                            *bus0_resp_d2 = 0; *bus0_resp_d3 = 0;
+                            *bus0_resp_valid = true;
+                        }
+                        else {
+                            *bus1_resp_err = 0;
+                            *bus1_resp_d0 = 0; *bus1_resp_d1 = 0;
+                            *bus1_resp_d2 = 0; *bus1_resp_d3 = 0;
+                            *bus1_resp_valid = true;
+                        }
+                    
 //----end code block-------
 
  _incrementPointer(10);
@@ -1058,7 +1058,7 @@ switch(_pointer[11])
 case 0:
 {
 
-//if statement , line:2810
+//if statement , line:2746
 if((((((grantedCmd)==(BUS_RD))))))
 _if_flag[5]=true;
 else
@@ -1078,7 +1078,7 @@ switch(_pointer[12])
 case 0:
 {
 
-//if statement , line:2813
+//if statement , line:2749
 if((((((suppliedDirty))))))
 _if_flag[6]=true;
 else
@@ -1099,14 +1099,14 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2816 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2752 ----
 
-                            statRdTransactions++;
-                            prepareMemStore(grantedAddr,
-                                (BLOCK_SIZE == 4) ? WORD :
-                                (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
-                                snoopD0, snoopD1, snoopD2, snoopD3);
-                        
+                                statRdTransactions++;
+                                prepareMemStore(grantedAddr,
+                                    (BLOCK_SIZE == 4) ? WORD :
+                                    (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
+                                    snoopD0, snoopD1, snoopD2, snoopD3);
+                            
 //----end code block-------
 
  _incrementPointer(13);
@@ -1114,7 +1114,7 @@ case 0:
 
 case 1 :
 {
-//do-while statement , line:2824
+//do-while statement , line:2760
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -1125,7 +1125,7 @@ switch(_pointer[14])
 case 0:
 {
 
-//wait-until statement , line:2825
+//wait-until statement , line:2761
 if(((((((current_time.phase()))==(1))))))
  _incrementPointer(14);
 else
@@ -1135,7 +1135,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2826 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2762 ----
  ok = dm_outp->push(requestToMemory); 
 //----end code block-------
 
@@ -1145,7 +1145,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:2827
+//if statement , line:2763
 if((((!((ok))))))
 _if_flag[7]=true;
 else
@@ -1165,7 +1165,7 @@ switch(_pointer[15])
 case 0:
 {
 
-//wait statement , line:2827
+//wait statement , line:2763
 _timer[4] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(15);
 }
@@ -1223,7 +1223,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2824 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2760 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[14]=0;                                                               
 		_incrementPointer(13);                                                                    
 	}                                                                                              
@@ -1241,7 +1241,7 @@ else break; //sequence has terminated
 };                                                                                                   
 case 2 :
 {
-//do-while statement , line:2830
+//do-while statement , line:2766
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -1252,7 +1252,7 @@ switch(_pointer[16])
 case 0:
 {
 
-//wait-until statement , line:2831
+//wait-until statement , line:2767
 if(((((((current_time.phase()))==(0))))))
  _incrementPointer(16);
 else
@@ -1262,7 +1262,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2832 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2768 ----
  hasToken = dm_inp->peek(responseFromMemory); 
 //----end code block-------
 
@@ -1272,7 +1272,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:2833
+//if statement , line:2769
 if((((!((hasToken))))))
 _if_flag[8]=true;
 else
@@ -1292,7 +1292,7 @@ switch(_pointer[17])
 case 0:
 {
 
-//wait statement , line:2833
+//wait statement , line:2769
 _timer[5] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(17);
 }
@@ -1350,7 +1350,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2830 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2766 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[16]=0;                                                               
 		_incrementPointer(13);                                                                    
 	}                                                                                              
@@ -1370,12 +1370,12 @@ case 3:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2836 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2772 ----
 
-                            pulled = dm_inp->pull(responseFromMemory);
-                            sitar::unpack(responseFromMemory, responseErr,
-                                responseData0, responseData1, responseData2, responseData3);
-                        
+                                pulled = dm_inp->pull(responseFromMemory);
+                                sitar::unpack(responseFromMemory, responseErr,
+                                    responseData0, responseData1, responseData2, responseData3);
+                            
 //----end code block-------
 
  _incrementPointer(13);
@@ -1385,37 +1385,37 @@ case 4:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2843 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2779 ----
 
-                            if(grantedIsIcache) {
-                                if(grantedId == 0) {
-                                    *bus_ic0_resp_err = 0;
-                                    *bus_ic0_resp_d0 = snoopD0; *bus_ic0_resp_d1 = snoopD1;
-                                    *bus_ic0_resp_d2 = snoopD2; *bus_ic0_resp_d3 = snoopD3;
-                                    *bus_ic0_resp_valid = true;
+                                if(grantedIsIcache) {
+                                    if(grantedId == 0) {
+                                        *bus_ic0_resp_err = 0;
+                                        *bus_ic0_resp_d0 = snoopD0; *bus_ic0_resp_d1 = snoopD1;
+                                        *bus_ic0_resp_d2 = snoopD2; *bus_ic0_resp_d3 = snoopD3;
+                                        *bus_ic0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus_ic1_resp_err = 0;
+                                        *bus_ic1_resp_d0 = snoopD0; *bus_ic1_resp_d1 = snoopD1;
+                                        *bus_ic1_resp_d2 = snoopD2; *bus_ic1_resp_d3 = snoopD3;
+                                        *bus_ic1_resp_valid = true;
+                                    }
                                 }
                                 else {
-                                    *bus_ic1_resp_err = 0;
-                                    *bus_ic1_resp_d0 = snoopD0; *bus_ic1_resp_d1 = snoopD1;
-                                    *bus_ic1_resp_d2 = snoopD2; *bus_ic1_resp_d3 = snoopD3;
-                                    *bus_ic1_resp_valid = true;
+                                    if(grantedId == 0) {
+                                        *bus0_resp_err = 0;
+                                        *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
+                                        *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
+                                        *bus0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus1_resp_err = 0;
+                                        *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
+                                        *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
+                                        *bus1_resp_valid = true;
+                                    }
                                 }
-                            }
-                            else {
-                                if(grantedId == 0) {
-                                    *bus0_resp_err = 0;
-                                    *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
-                                    *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
-                                    *bus0_resp_valid = true;
-                                }
-                                else {
-                                    *bus1_resp_err = 0;
-                                    *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
-                                    *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
-                                    *bus1_resp_valid = true;
-                                }
-                            }
-                        
+                            
 //----end code block-------
 
  _incrementPointer(13);
@@ -1436,11 +1436,11 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2877 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2813 ----
 
-                            statRdTransactions++;
-                            prepareMemLoad(grantedAddr);
-                        
+                                statRdTransactions++;
+                                prepareMemLoad(grantedAddr);
+                            
 //----end code block-------
 
  _incrementPointer(18);
@@ -1448,7 +1448,7 @@ case 0:
 
 case 1 :
 {
-//do-while statement , line:2882
+//do-while statement , line:2818
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -1459,7 +1459,7 @@ switch(_pointer[19])
 case 0:
 {
 
-//wait-until statement , line:2883
+//wait-until statement , line:2819
 if(((((((current_time.phase()))==(1))))))
  _incrementPointer(19);
 else
@@ -1469,7 +1469,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2884 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2820 ----
  ok = (grantedIsIcache ? im_outp : dm_outp)->push(requestToMemory); 
 //----end code block-------
 
@@ -1479,7 +1479,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:2885
+//if statement , line:2821
 if((((!((ok))))))
 _if_flag[9]=true;
 else
@@ -1499,7 +1499,7 @@ switch(_pointer[20])
 case 0:
 {
 
-//wait statement , line:2885
+//wait statement , line:2821
 _timer[6] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(20);
 }
@@ -1557,7 +1557,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2882 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2818 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[19]=0;                                                               
 		_incrementPointer(18);                                                                    
 	}                                                                                              
@@ -1575,7 +1575,7 @@ else break; //sequence has terminated
 };                                                                                                   
 case 2 :
 {
-//do-while statement , line:2888
+//do-while statement , line:2824
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -1586,7 +1586,7 @@ switch(_pointer[21])
 case 0:
 {
 
-//wait-until statement , line:2889
+//wait-until statement , line:2825
 if(((((((current_time.phase()))==(0))))))
  _incrementPointer(21);
 else
@@ -1596,7 +1596,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2890 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2826 ----
  hasToken = (grantedIsIcache ? im_inp : dm_inp)->peek(responseFromMemory); 
 //----end code block-------
 
@@ -1606,7 +1606,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:2891
+//if statement , line:2827
 if((((!((hasToken))))))
 _if_flag[10]=true;
 else
@@ -1626,7 +1626,7 @@ switch(_pointer[22])
 case 0:
 {
 
-//wait statement , line:2891
+//wait statement , line:2827
 _timer[7] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(22);
 }
@@ -1684,7 +1684,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2888 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2824 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[21]=0;                                                               
 		_incrementPointer(18);                                                                    
 	}                                                                                              
@@ -1704,41 +1704,41 @@ case 3:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2894 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2830 ----
 
-                            pulled = (grantedIsIcache ? im_inp : dm_inp)->pull(responseFromMemory);
-                            sitar::unpack(responseFromMemory, responseErr,
-                                responseData0, responseData1, responseData2, responseData3);
+                                pulled = (grantedIsIcache ? im_inp : dm_inp)->pull(responseFromMemory);
+                                sitar::unpack(responseFromMemory, responseErr,
+                                    responseData0, responseData1, responseData2, responseData3);
 
-                            if(grantedIsIcache) {
-                                if(grantedId == 0) {
-                                    *bus_ic0_resp_err = responseErr;
-                                    *bus_ic0_resp_d0 = responseData0; *bus_ic0_resp_d1 = responseData1;
-                                    *bus_ic0_resp_d2 = responseData2; *bus_ic0_resp_d3 = responseData3;
-                                    *bus_ic0_resp_valid = true;
+                                if(grantedIsIcache) {
+                                    if(grantedId == 0) {
+                                        *bus_ic0_resp_err = responseErr;
+                                        *bus_ic0_resp_d0 = responseData0; *bus_ic0_resp_d1 = responseData1;
+                                        *bus_ic0_resp_d2 = responseData2; *bus_ic0_resp_d3 = responseData3;
+                                        *bus_ic0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus_ic1_resp_err = responseErr;
+                                        *bus_ic1_resp_d0 = responseData0; *bus_ic1_resp_d1 = responseData1;
+                                        *bus_ic1_resp_d2 = responseData2; *bus_ic1_resp_d3 = responseData3;
+                                        *bus_ic1_resp_valid = true;
+                                    }
                                 }
                                 else {
-                                    *bus_ic1_resp_err = responseErr;
-                                    *bus_ic1_resp_d0 = responseData0; *bus_ic1_resp_d1 = responseData1;
-                                    *bus_ic1_resp_d2 = responseData2; *bus_ic1_resp_d3 = responseData3;
-                                    *bus_ic1_resp_valid = true;
+                                    if(grantedId == 0) {
+                                        *bus0_resp_err = responseErr;
+                                        *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
+                                        *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
+                                        *bus0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus1_resp_err = responseErr;
+                                        *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
+                                        *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
+                                        *bus1_resp_valid = true;
+                                    }
                                 }
-                            }
-                            else {
-                                if(grantedId == 0) {
-                                    *bus0_resp_err = responseErr;
-                                    *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
-                                    *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
-                                    *bus0_resp_valid = true;
-                                }
-                                else {
-                                    *bus1_resp_err = responseErr;
-                                    *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
-                                    *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
-                                    *bus1_resp_valid = true;
-                                }
-                            }
-                        
+                            
 //----end code block-------
 
  _incrementPointer(18);
@@ -1779,7 +1779,7 @@ switch(_pointer[23])
 case 0:
 {
 
-//if statement , line:2933
+//if statement , line:2869
 if((((((grantedCmd)==(BUS_RDX))))))
 _if_flag[11]=true;
 else
@@ -1799,7 +1799,7 @@ switch(_pointer[24])
 case 0:
 {
 
-//if statement , line:2936
+//if statement , line:2872
 if((((((suppliedDirty))))))
 _if_flag[12]=true;
 else
@@ -1820,23 +1820,23 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2939 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2875 ----
 
-                                statRdxTransactions++;
+                                    statRdxTransactions++;
 
-                                if(grantedId == 0) {
-                                    *bus0_resp_err = 0;
-                                    *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
-                                    *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
-                                    *bus0_resp_valid = true;
-                                }
-                                else {
-                                    *bus1_resp_err = 0;
-                                    *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
-                                    *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
-                                    *bus1_resp_valid = true;
-                                }
-                            
+                                    if(grantedId == 0) {
+                                        *bus0_resp_err = 0;
+                                        *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
+                                        *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
+                                        *bus0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus1_resp_err = 0;
+                                        *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
+                                        *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
+                                        *bus1_resp_valid = true;
+                                    }
+                                
 //----end code block-------
 
  _incrementPointer(25);
@@ -1845,7 +1845,7 @@ case 0:
 case 1:
 {
 
-//wait-for -time statement , line:2956
+//wait-for -time statement , line:2892
 _timer[8] = sitar::time(current_time)+sitar::time(((BUS_SNOOP_DELAY)),((0)));
  _incrementPointer(25);
 }
@@ -1872,11 +1872,11 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2961 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2897 ----
 
-                                statRdxTransactions++;
-                                prepareMemLoad(grantedAddr);
-                            
+                                    statRdxTransactions++;
+                                    prepareMemLoad(grantedAddr);
+                                
 //----end code block-------
 
  _incrementPointer(26);
@@ -1884,7 +1884,7 @@ case 0:
 
 case 1 :
 {
-//do-while statement , line:2966
+//do-while statement , line:2902
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -1895,7 +1895,7 @@ switch(_pointer[27])
 case 0:
 {
 
-//wait-until statement , line:2967
+//wait-until statement , line:2903
 if(((((((current_time.phase()))==(1))))))
  _incrementPointer(27);
 else
@@ -1905,7 +1905,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2968 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2904 ----
  ok = dm_outp->push(requestToMemory); 
 //----end code block-------
 
@@ -1915,7 +1915,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:2969
+//if statement , line:2905
 if((((!((ok))))))
 _if_flag[13]=true;
 else
@@ -1935,7 +1935,7 @@ switch(_pointer[28])
 case 0:
 {
 
-//wait statement , line:2969
+//wait statement , line:2905
 _timer[9] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(28);
 }
@@ -1993,7 +1993,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2966 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2902 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[27]=0;                                                               
 		_incrementPointer(26);                                                                    
 	}                                                                                              
@@ -2011,7 +2011,7 @@ else break; //sequence has terminated
 };                                                                                                   
 case 2 :
 {
-//do-while statement , line:2972
+//do-while statement , line:2908
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -2022,7 +2022,7 @@ switch(_pointer[29])
 case 0:
 {
 
-//wait-until statement , line:2973
+//wait-until statement , line:2909
 if(((((((current_time.phase()))==(0))))))
  _incrementPointer(29);
 else
@@ -2032,7 +2032,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2974 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2910 ----
  hasToken = dm_inp->peek(responseFromMemory); 
 //----end code block-------
 
@@ -2042,7 +2042,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:2975
+//if statement , line:2911
 if((((!((hasToken))))))
 _if_flag[14]=true;
 else
@@ -2062,7 +2062,7 @@ switch(_pointer[30])
 case 0:
 {
 
-//wait statement , line:2975
+//wait statement , line:2911
 _timer[10] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(30);
 }
@@ -2120,7 +2120,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2972 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2908 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[29]=0;                                                               
 		_incrementPointer(26);                                                                    
 	}                                                                                              
@@ -2140,25 +2140,25 @@ case 3:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2978 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2914 ----
 
-                                pulled = dm_inp->pull(responseFromMemory);
-                                sitar::unpack(responseFromMemory, responseErr,
-                                    responseData0, responseData1, responseData2, responseData3);
+                                    pulled = dm_inp->pull(responseFromMemory);
+                                    sitar::unpack(responseFromMemory, responseErr,
+                                        responseData0, responseData1, responseData2, responseData3);
 
-                                if(grantedId == 0) {
-                                    *bus0_resp_err = responseErr;
-                                    *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
-                                    *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
-                                    *bus0_resp_valid = true;
-                                }
-                                else {
-                                    *bus1_resp_err = responseErr;
-                                    *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
-                                    *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
-                                    *bus1_resp_valid = true;
-                                }
-                            
+                                    if(grantedId == 0) {
+                                        *bus0_resp_err = responseErr;
+                                        *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
+                                        *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
+                                        *bus0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus1_resp_err = responseErr;
+                                        *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
+                                        *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
+                                        *bus1_resp_valid = true;
+                                    }
+                                
 //----end code block-------
 
  _incrementPointer(26);
@@ -2199,7 +2199,7 @@ switch(_pointer[31])
 case 0:
 {
 
-//if statement , line:2999
+//if statement , line:2935
 if((((((grantedCmd)==(BUS_ATOMIC))))))
 _if_flag[15]=true;
 else
@@ -2220,36 +2220,36 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3018 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2954 ----
 
-                            statAtomicTransactions++;
+                                    statAtomicTransactions++;
 
-                            // Release the requester's own copy of the block
-                            if(grantedId == 0) {
-                                reqDirty = dcache0->release_for_atomic(
-                                    snoopAddr, reqD0, reqD1, reqD2, reqD3);
-                            }
-                            else {
-                                reqDirty = dcache1->release_for_atomic(
-                                    snoopAddr, reqD0, reqD1, reqD2, reqD3);
-                            }
+                                    // Release the requester's own copy of the block
+                                    if(grantedId == 0) {
+                                        reqDirty = dcache0->release_for_atomic(
+                                            snoopAddr, reqD0, reqD1, reqD2, reqD3);
+                                    }
+                                    else {
+                                        reqDirty = dcache1->release_for_atomic(
+                                            snoopAddr, reqD0, reqD1, reqD2, reqD3);
+                                    }
 
-                            log << endl
-                                << "BUS ATOMIC core=" << grantedId
-                                << " word=" << grantedAddr
-                                << " block=" << snoopAddr
-                                << " reqDirty=" << reqDirty
-                                << " peerDirty=" << suppliedDirty
-                                << " cycle=" << current_time.cycle();
+                                    log << endl
+                                        << "BUS ATOMIC core=" << grantedId
+                                        << " word=" << grantedAddr
+                                        << " block=" << snoopAddr
+                                        << " reqDirty=" << reqDirty
+                                        << " peerDirty=" << suppliedDirty
+                                        << " cycle=" << current_time.cycle();
 
-                            if(reqDirty && suppliedDirty) {
-                                statBothDirty++;
-                                log << endl
-                                    << "BUS ATOMIC BOTH-DIRTY block=" << snoopAddr
-                                    << " (peer flushed first, requester last)"
-                                    << " cycle=" << current_time.cycle();
-                            }
-                        
+                                    if(reqDirty && suppliedDirty) {
+                                        statBothDirty++;
+                                        log << endl
+                                            << "BUS ATOMIC BOTH-DIRTY block=" << snoopAddr
+                                            << " (peer flushed first, requester last)"
+                                            << " cycle=" << current_time.cycle();
+                                    }
+                                
 //----end code block-------
 
  _incrementPointer(32);
@@ -2258,7 +2258,7 @@ case 0:
 case 1:
 {
 
-//if statement , line:3051
+//if statement , line:2987
 if((((((suppliedDirty))))))
 _if_flag[16]=true;
 else
@@ -2279,13 +2279,13 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3052 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2988 ----
 
-                                prepareMemStore(snoopAddr,
-                                    (BLOCK_SIZE == 4) ? WORD :
-                                    (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
-                                    snoopD0, snoopD1, snoopD2, snoopD3);
-                            
+                                        prepareMemStore(snoopAddr,
+                                            (BLOCK_SIZE == 4) ? WORD :
+                                            (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
+                                            snoopD0, snoopD1, snoopD2, snoopD3);
+                                    
 //----end code block-------
 
  _incrementPointer(33);
@@ -2293,7 +2293,7 @@ case 0:
 
 case 1 :
 {
-//do-while statement , line:3059
+//do-while statement , line:2995
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -2304,7 +2304,7 @@ switch(_pointer[34])
 case 0:
 {
 
-//wait-until statement , line:3060
+//wait-until statement , line:2996
 if(((((((current_time.phase()))==(1))))))
  _incrementPointer(34);
 else
@@ -2314,7 +2314,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3061 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:2997 ----
  ok = dm_outp->push(requestToMemory); 
 //----end code block-------
 
@@ -2324,7 +2324,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:3062
+//if statement , line:2998
 if((((!((ok))))))
 _if_flag[17]=true;
 else
@@ -2344,7 +2344,7 @@ switch(_pointer[35])
 case 0:
 {
 
-//wait statement , line:3062
+//wait statement , line:2998
 _timer[11] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(35);
 }
@@ -2402,7 +2402,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3059 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2995 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[34]=0;                                                               
 		_incrementPointer(33);                                                                    
 	}                                                                                              
@@ -2420,7 +2420,7 @@ else break; //sequence has terminated
 };                                                                                                   
 case 2 :
 {
-//do-while statement , line:3065
+//do-while statement , line:3001
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -2431,7 +2431,7 @@ switch(_pointer[36])
 case 0:
 {
 
-//wait-until statement , line:3066
+//wait-until statement , line:3002
 if(((((((current_time.phase()))==(0))))))
  _incrementPointer(36);
 else
@@ -2441,7 +2441,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3067 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3003 ----
  hasToken = dm_inp->peek(responseFromMemory); 
 //----end code block-------
 
@@ -2451,7 +2451,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:3068
+//if statement , line:3004
 if((((!((hasToken))))))
 _if_flag[18]=true;
 else
@@ -2471,7 +2471,7 @@ switch(_pointer[37])
 case 0:
 {
 
-//wait statement , line:3068
+//wait statement , line:3004
 _timer[12] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(37);
 }
@@ -2529,7 +2529,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3065 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3001 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[36]=0;                                                               
 		_incrementPointer(33);                                                                    
 	}                                                                                              
@@ -2549,12 +2549,12 @@ case 3:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3071 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3007 ----
 
-                                pulled = dm_inp->pull(responseFromMemory);
-                                sitar::unpack(responseFromMemory, responseErr,
-                                    responseData0, responseData1, responseData2, responseData3);
-                            
+                                        pulled = dm_inp->pull(responseFromMemory);
+                                        sitar::unpack(responseFromMemory, responseErr,
+                                            responseData0, responseData1, responseData2, responseData3);
+                                    
 //----end code block-------
 
  _incrementPointer(33);
@@ -2587,7 +2587,7 @@ if((_if_flag[16]==true && _pointer[33]>=_pointer_last_value[33]) || (_if_flag[16
 case 3:
 {
 
-//if statement , line:3080
+//if statement , line:3016
 if((((((reqDirty))))))
 _if_flag[19]=true;
 else
@@ -2608,13 +2608,13 @@ case 0:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3081 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3017 ----
 
-                                prepareMemStore(snoopAddr,
-                                    (BLOCK_SIZE == 4) ? WORD :
-                                    (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
-                                    reqD0, reqD1, reqD2, reqD3);
-                            
+                                        prepareMemStore(snoopAddr,
+                                            (BLOCK_SIZE == 4) ? WORD :
+                                            (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
+                                            reqD0, reqD1, reqD2, reqD3);
+                                    
 //----end code block-------
 
  _incrementPointer(38);
@@ -2622,7 +2622,7 @@ case 0:
 
 case 1 :
 {
-//do-while statement , line:3088
+//do-while statement , line:3024
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -2633,7 +2633,7 @@ switch(_pointer[39])
 case 0:
 {
 
-//wait-until statement , line:3089
+//wait-until statement , line:3025
 if(((((((current_time.phase()))==(1))))))
  _incrementPointer(39);
 else
@@ -2643,7 +2643,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3090 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3026 ----
  ok = dm_outp->push(requestToMemory); 
 //----end code block-------
 
@@ -2653,7 +2653,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:3091
+//if statement , line:3027
 if((((!((ok))))))
 _if_flag[20]=true;
 else
@@ -2673,7 +2673,7 @@ switch(_pointer[40])
 case 0:
 {
 
-//wait statement , line:3091
+//wait statement , line:3027
 _timer[13] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(40);
 }
@@ -2731,7 +2731,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3088 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3024 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[39]=0;                                                               
 		_incrementPointer(38);                                                                    
 	}                                                                                              
@@ -2749,7 +2749,7 @@ else break; //sequence has terminated
 };                                                                                                   
 case 2 :
 {
-//do-while statement , line:3094
+//do-while statement , line:3030
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -2760,7 +2760,7 @@ switch(_pointer[41])
 case 0:
 {
 
-//wait-until statement , line:3095
+//wait-until statement , line:3031
 if(((((((current_time.phase()))==(0))))))
  _incrementPointer(41);
 else
@@ -2770,7 +2770,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3096 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3032 ----
  hasToken = dm_inp->peek(responseFromMemory); 
 //----end code block-------
 
@@ -2780,7 +2780,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:3097
+//if statement , line:3033
 if((((!((hasToken))))))
 _if_flag[21]=true;
 else
@@ -2800,7 +2800,7 @@ switch(_pointer[42])
 case 0:
 {
 
-//wait statement , line:3097
+//wait statement , line:3033
 _timer[14] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(42);
 }
@@ -2858,7 +2858,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3094 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3030 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[41]=0;                                                               
 		_incrementPointer(38);                                                                    
 	}                                                                                              
@@ -2878,12 +2878,12 @@ case 3:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3100 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3036 ----
 
-                                pulled = dm_inp->pull(responseFromMemory);
-                                sitar::unpack(responseFromMemory, responseErr,
-                                    responseData0, responseData1, responseData2, responseData3);
-                            
+                                        pulled = dm_inp->pull(responseFromMemory);
+                                        sitar::unpack(responseFromMemory, responseErr,
+                                            responseData0, responseData1, responseData2, responseData3);
+                                    
 //----end code block-------
 
  _incrementPointer(38);
@@ -2917,10 +2917,10 @@ case 5:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3108 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3044 ----
 
-                            prepareMemAtomic(grantedAddr, grantedSize);
-                        
+                                    prepareMemAtomic(grantedAddr, grantedSize);
+                                
 //----end code block-------
 
  _incrementPointer(32);
@@ -2928,7 +2928,7 @@ case 5:
 
 case 6 :
 {
-//do-while statement , line:3112
+//do-while statement , line:3048
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -2939,7 +2939,7 @@ switch(_pointer[43])
 case 0:
 {
 
-//wait-until statement , line:3113
+//wait-until statement , line:3049
 if(((((((current_time.phase()))==(1))))))
  _incrementPointer(43);
 else
@@ -2949,7 +2949,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3114 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3050 ----
  ok = dm_outp->push(requestToMemory); 
 //----end code block-------
 
@@ -2959,7 +2959,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:3115
+//if statement , line:3051
 if((((!((ok))))))
 _if_flag[22]=true;
 else
@@ -2979,7 +2979,7 @@ switch(_pointer[44])
 case 0:
 {
 
-//wait statement , line:3115
+//wait statement , line:3051
 _timer[15] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(44);
 }
@@ -3037,7 +3037,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3112 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3048 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[43]=0;                                                               
 		_incrementPointer(32);                                                                    
 	}                                                                                              
@@ -3055,7 +3055,7 @@ else break; //sequence has terminated
 };                                                                                                   
 case 7 :
 {
-//do-while statement , line:3118
+//do-while statement , line:3054
  int _dowhile_iteration;
 for(_dowhile_iteration=1; _dowhile_iteration<=SITAR_ITERATION_LIMIT; _dowhile_iteration++)
 {
@@ -3066,7 +3066,7 @@ switch(_pointer[45])
 case 0:
 {
 
-//wait-until statement , line:3119
+//wait-until statement , line:3055
 if(((((((current_time.phase()))==(0))))))
  _incrementPointer(45);
 else
@@ -3076,7 +3076,7 @@ case 1:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3120 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3056 ----
  hasToken = dm_inp->peek(responseFromMemory); 
 //----end code block-------
 
@@ -3086,7 +3086,7 @@ case 1:
 case 2:
 {
 
-//if statement , line:3121
+//if statement , line:3057
 if((((!((hasToken))))))
 _if_flag[23]=true;
 else
@@ -3106,7 +3106,7 @@ switch(_pointer[46])
 case 0:
 {
 
-//wait statement , line:3121
+//wait statement , line:3057
 _timer[16] = sitar::time(current_time)+sitar::time(0,1);
  _incrementPointer(46);
 }
@@ -3164,7 +3164,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3118 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:3054 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[45]=0;                                                               
 		_incrementPointer(32);                                                                    
 	}                                                                                              
@@ -3184,25 +3184,25 @@ case 8:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3125 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3061 ----
 
-                            pulled = dm_inp->pull(responseFromMemory);
-                            sitar::unpack(responseFromMemory, responseErr,
-                                responseData0, responseData1, responseData2, responseData3);
+                                    pulled = dm_inp->pull(responseFromMemory);
+                                    sitar::unpack(responseFromMemory, responseErr,
+                                        responseData0, responseData1, responseData2, responseData3);
 
-                            if(grantedId == 0) {
-                                *bus0_resp_err = responseErr;
-                                *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
-                                *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
-                                *bus0_resp_valid = true;
-                            }
-                            else {
-                                *bus1_resp_err = responseErr;
-                                *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
-                                *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
-                                *bus1_resp_valid = true;
-                            }
-                        
+                                    if(grantedId == 0) {
+                                        *bus0_resp_err = responseErr;
+                                        *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
+                                        *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
+                                        *bus0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus1_resp_err = responseErr;
+                                        *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
+                                        *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
+                                        *bus1_resp_valid = true;
+                                    }
+                                
 //----end code block-------
 
  _incrementPointer(32);
@@ -3320,7 +3320,7 @@ case 4:
 { 
  
 //code_block_statement 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3158 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3094 ----
 
                 if(!isWbRequest) {
                     int s0 = dcache0->line_state(snoopAddr);
@@ -3351,7 +3351,7 @@ case 4:
 case 5:
 {
 
-//wait-for -time statement , line:3184
+//wait-for -time statement , line:3120
 _timer[17] = sitar::time(current_time)+sitar::time(((1)),((0)));
  _incrementPointer(1);
 }
@@ -3385,7 +3385,7 @@ else break; //sequence has terminated
 	{                                                                                               
 		//iteration limit exceeded. Throw error and                                             
 		//terminate the do-while statement                                                      
- 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2568 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
+ 		std::cerr<<"\nERROR:Iteration limit exceeded for do-while loop on line:2504 in file /home/sidd64/Sitar_Assignment_1/model.sitar";
 		_pointer[1]=0;                                                               
 		_incrementPointer(0);                                                                    
 	}                                                                                              

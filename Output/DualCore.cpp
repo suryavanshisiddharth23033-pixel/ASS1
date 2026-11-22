@@ -2,7 +2,7 @@
 	//====================================================================
 	//file DualCore.cpp                                                 
 	//Describes module DualCore                                      
-	//Auto-generated from input "/home/sidd64/Sitar_Assignment_1/model.sitar" on 2026-11-21 at time 14:10:27   
+	//Auto-generated from input "/home/sidd64/Sitar_Assignment_1/model.sitar" on 2026-11-22 at time 15:20:18   
 	//====================================================================
 	#include"DualCore.h"
 	#include<iostream>
@@ -77,7 +77,7 @@ addInport(&dm_inp,"dm_inp");
 dm_outp.setInstanceId("dm_outp");
 addOutport(&dm_outp,"dm_outp");
 
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3227 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3163 ----
 
 
         // Coherence bus <-> instruction memory port
@@ -315,7 +315,7 @@ switch(_pointer[0])
 
 case 0: {
 
-//parallel statement begins, line 3418
+//parallel statement begins, line 3354
 //one branch of parallel statement, using pointer 1
 switch(_pointer[1])
 {
@@ -323,7 +323,7 @@ switch(_pointer[1])
 case 0:
 { 
  
-//run procedure statement , line:3419
+//run procedure statement , line:3355
 proc0.run(current_time);
 if(proc0._terminated==1)
 {
@@ -350,7 +350,7 @@ switch(_pointer[2])
 case 0:
 { 
  
-//run procedure statement , line:3421
+//run procedure statement , line:3357
 proc1.run(current_time);
 if(proc1._terminated==1)
 {
@@ -377,7 +377,7 @@ switch(_pointer[3])
 case 0:
 { 
  
-//run procedure statement , line:3423
+//run procedure statement , line:3359
 icache0.run(current_time);
 if(icache0._terminated==1)
 {
@@ -404,7 +404,7 @@ switch(_pointer[4])
 case 0:
 { 
  
-//run procedure statement , line:3425
+//run procedure statement , line:3361
 icache1.run(current_time);
 if(icache1._terminated==1)
 {
@@ -431,7 +431,7 @@ switch(_pointer[5])
 case 0:
 { 
  
-//run procedure statement , line:3427
+//run procedure statement , line:3363
 dcache0.run(current_time);
 if(dcache0._terminated==1)
 {
@@ -458,7 +458,7 @@ switch(_pointer[6])
 case 0:
 { 
  
-//run procedure statement , line:3429
+//run procedure statement , line:3365
 dcache1.run(current_time);
 if(dcache1._terminated==1)
 {
@@ -485,7 +485,7 @@ switch(_pointer[7])
 case 0:
 { 
  
-//run procedure statement , line:3431
+//run procedure statement , line:3367
 dcache0_wb.run(current_time);
 if(dcache0_wb._terminated==1)
 {
@@ -512,7 +512,7 @@ switch(_pointer[8])
 case 0:
 { 
  
-//run procedure statement , line:3433
+//run procedure statement , line:3369
 dcache1_wb.run(current_time);
 if(dcache1_wb._terminated==1)
 {
@@ -539,7 +539,7 @@ switch(_pointer[9])
 case 0:
 { 
  
-//run procedure statement , line:3435
+//run procedure statement , line:3371
 bus.run(current_time);
 if(bus._terminated==1)
 {

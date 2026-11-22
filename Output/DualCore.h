@@ -4,7 +4,7 @@
 	//======================================
 	//file DualCore.h                                                  
 	//Describes module DualCore                                      
-	//Auto-generated from input file "/home/sidd64/Sitar_Assignment_1/model.sitar" on 2026-11-21 at time 14:10:27   
+	//Auto-generated from input file "/home/sidd64/Sitar_Assignment_1/model.sitar" on 2026-11-22 at time 15:20:18   
 	
 	//(This design unit is not parameterized. Generating code into .h and .cpp files) 
 	//======================================
@@ -71,7 +71,7 @@ inport<17> im_inp;
 outport<22> im_outp;
 inport<17> dm_inp;
 outport<22> dm_outp;
-//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3222 ----
+//----code block from file /home/sidd64/Sitar_Assignment_1/model.sitar, line:3158 ----
 
         bool proc0Done;
         bool proc1Done;

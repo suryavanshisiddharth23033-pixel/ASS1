@@ -1574,10 +1574,6 @@ procedure Cache
 
                         // ATOMIC: read-modify-write.
                         //
-                        // For the instruction cache the operation bypasses the
-                        // cache and goes straight to private IM (read-only,
-                        // no coherence hazard).
-                        //
                         // For the data cache the operation is coherent: the
                         // request is forwarded to the CoherenceBus as
                         // BUS_ATOMIC. The bus serializes the atomic against
@@ -1596,89 +1592,53 @@ procedure Cache
                                 << " cycle=" << current_time.cycle();
                         $;
 
-                        if(isDcache == 0) then
 
-                            // ICache: bus-mediated (coherent, shared IM)
+                        // DCache: coherent bus-mediated atomic.
+                        //
+                        // Wait for any parked write-back of the same
+                        // block to drain first, otherwise the atomic's
+                        // result could be clobbered by a late write-back.
+                        do
                             $
-                                bus_req_cmd = BUS_RD;
-                                bus_req_addr = requestAddr;
-                                bus_req_size = requestSize;
-                                bus_req_valid = true;
-
-                                log << endl
-                                    << "[C" << coreId << "] BUS_REQ cmd="
-                                    << (int)bus_req_cmd << " addr=" << bus_req_addr
-                                    << " cycle=" << current_time.cycle();
+                                conflict = wbPending &&
+                                    ((wbBlockAddr & ~((uint32_t)BLOCK_SIZE - 1)) == missBlockAddr);
+                                if(conflict) statConflictStall++;
                             $;
+                            if(conflict) then wait end if;
+                        while(conflict) end do;
 
-                            do
-                                $
-                                    busDone = bus_resp_valid;
-                                    if(!busDone) statBusWaitCycles++;
-                                $;
-                                if(not busDone) then wait end if;
-                            while(not busDone) end do;
+                        $
+                            bus_req_cmd = BUS_ATOMIC;
+                            // Atomic operates on the exact word address;
+                            // the bus masks to the block address for the
+                            // snoop phase.
+                            bus_req_addr = requestAddr;
+                            bus_req_size = requestSize;
+                            bus_req_valid = true;
 
+                            log << endl
+                                << "[C" << coreId << "] BUS_REQ cmd="
+                                << (int)bus_req_cmd << " addr=" << bus_req_addr
+                                << " cycle=" << current_time.cycle();
+                        $;
+
+                        do
                             $
-                                bus_resp_valid = false;
-                                bus_req_valid = false;
-                                responseErr = bus_resp_err;
-                                responseData0 = bus_resp_d0;
-                                responseData1 = bus_resp_d1;
-                                responseData2 = bus_resp_d2;
-                                responseData3 = bus_resp_d3;
+                                busDone = bus_resp_valid;
+                                if(!busDone) statBusWaitCycles++;
                             $;
+                            if(not busDone) then wait end if;
+                        while(not busDone) end do;
 
-                        else
-
-                            // DCache: coherent bus-mediated atomic.
-                            //
-                            // Wait for any parked write-back of the same
-                            // block to drain first, otherwise the atomic's
-                            // result could be clobbered by a late write-back.
-                            do
-                                $
-                                    conflict = wbPending &&
-                                        ((wbBlockAddr & ~((uint32_t)BLOCK_SIZE - 1)) == missBlockAddr);
-                                    if(conflict) statConflictStall++;
-                                $;
-                                if(conflict) then wait end if;
-                            while(conflict) end do;
-
-                            $
-                                bus_req_cmd = BUS_ATOMIC;
-                                // Atomic operates on the exact word address;
-                                // the bus masks to the block address for the
-                                // snoop phase.
-                                bus_req_addr = requestAddr;
-                                bus_req_size = requestSize;
-                                bus_req_valid = true;
-
-                                log << endl
-                                    << "[C" << coreId << "] BUS_REQ cmd="
-                                    << (int)bus_req_cmd << " addr=" << bus_req_addr
-                                    << " cycle=" << current_time.cycle();
-                            $;
-
-                            do
-                                $
-                                    busDone = bus_resp_valid;
-                                    if(!busDone) statBusWaitCycles++;
-                                $;
-                                if(not busDone) then wait end if;
-                            while(not busDone) end do;
-
-                            $
-                                bus_resp_valid = false;
-                                bus_req_valid = false;
-                                responseErr = bus_resp_err;
-                                responseData0 = bus_resp_d0;
-                                responseData1 = bus_resp_d1;
-                                responseData2 = bus_resp_d2;
-                                responseData3 = bus_resp_d3;
-                            $;
-
-                        end if;
+                        $
+                            bus_resp_valid = false;
+                            bus_req_valid = false;
+                            responseErr = bus_resp_err;
+                            responseData0 = bus_resp_d0;
+                            responseData1 = bus_resp_d1;
+                            responseData2 = bus_resp_d2;
+                            responseData3 = bus_resp_d3;
+                        $;
 
                     else
 
@@ -1756,6 +1716,12 @@ procedure Cache
                                         set_store_data();
                                         write_data_to_cache(requestAddr, requestSize);
                                         cache[get_set_index(requestAddr)][recheckWay].state = MODIFIED;
+
+                                        if(writePolicy != WB_WRITE_ALLOCATE) {
+                                            wtNeeded = true;
+                                            wtStoreAddr = requestAddr;
+                                            wtStoreSize = requestSize;
+                                        }
                                     }
                                     else {
                                         // The initial shared hit no longer
@@ -1818,6 +1784,12 @@ procedure Cache
                                         write_data_to_cache(requestAddr, requestSize);
                                         cache[wb_setIdx][wb_victimWay].state = MODIFIED;
 
+                                        if(writePolicy != WB_WRITE_ALLOCATE) {
+                                            wtNeeded = true;
+                                            wtStoreAddr = requestAddr;
+                                            wtStoreSize = requestSize;
+                                        }
+
                                         log << endl << "[C" << coreId
                                             << "] BUS_UPGR RECOVERED addr=" << requestAddr
                                             << " via BUS_RDX";
@@ -1825,65 +1797,30 @@ procedure Cache
                                 $;
                             end if;
 
-                            // Only proceed if still a HIT (not downgraded to MISS above)
-                            if(cacheStatus == HIT and not upgradeNeeded) then
+                            if(wtNeeded) then
+                                do
+                                    $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                    if(bufBusy) then wait end if;
+                                while(bufBusy) end do;
 
-                                // WRITE-THROUGH store on HIT
-                                if(wtNeeded) then
+                                $
+                                    statWriteThroughs++;
+                                    wbBlockAddr = wtStoreAddr;
+                                    wbSize = wtStoreSize;
+                                    wbData0 = responseData0;
+                                    wbData1 = responseData1;
+                                    wbData2 = responseData2;
+                                    wbData3 = responseData3;
+                                    wbPending = true;
+                                    wtNeeded = false;
+                                $;
+
+                                if(nonBlocking == 0) then
                                     do
-                                        $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
+                                        $ bufBusy = wbPending; $;
                                         if(bufBusy) then wait end if;
                                     while(bufBusy) end do;
-
-                                    $
-                                        statWriteThroughs++;
-                                        wbBlockAddr = wtStoreAddr;
-                                        wbSize = wtStoreSize;
-                                        wbData0 = responseData0;
-                                        wbData1 = responseData1;
-                                        wbData2 = responseData2;
-                                        wbData3 = responseData3;
-                                        wbPending = true;
-                                    $;
-
-                                    if(nonBlocking == 0) then
-                                        do
-                                            $ bufBusy = wbPending; $;
-                                            if(bufBusy) then wait end if;
-                                        while(bufBusy) end do;
-                                    end if;
                                 end if;
-
-                            end if;
-
-                            // If upgrade succeeded (cacheStatus still HIT, upgradeNeeded was true)
-                            if(cacheStatus == HIT and upgradeNeeded) then
-
-                                if(wtNeeded) then
-                                    do
-                                        $ bufBusy = wbPending; if(bufBusy) statBufferStall++; $;
-                                        if(bufBusy) then wait end if;
-                                    while(bufBusy) end do;
-
-                                    $
-                                        statWriteThroughs++;
-                                        wbBlockAddr = wtStoreAddr;
-                                        wbSize = wtStoreSize;
-                                        wbData0 = responseData0;
-                                        wbData1 = responseData1;
-                                        wbData2 = responseData2;
-                                        wbData3 = responseData3;
-                                        wbPending = true;
-                                    $;
-
-                                    if(nonBlocking == 0) then
-                                        do
-                                            $ bufBusy = wbPending; $;
-                                            if(bufBusy) then wait end if;
-                                        while(bufBusy) end do;
-                                    end if;
-                                end if;
-
                             end if;
 
                         else
@@ -2116,16 +2053,15 @@ procedure Cache
                                             if(bufBusy) then wait end if;
                                         while(bufBusy) end do;
                                     end if;
+                                end if;
+
+                            end if;
+
                         end if;
 
                     end if;
 
-
                 end if;
-
-            end if;
-
-            end if;
 
             end if;
 
@@ -2780,277 +2716,42 @@ procedure CoherenceBus
 
             else
 
-            // Execute front-end coherence transaction based on command
-            if(grantedCmd == BUS_UPGR) then
+                // Execute front-end coherence transaction based on command
+                if(grantedCmd == BUS_UPGR) then
 
-                // BUS_UPGR: snoop-only, no memory access needed
-                $
-                    statUpgrTransactions++;
-                $;
+                    // BUS_UPGR: snoop-only, no memory access needed
+                    $
+                        statUpgrTransactions++;
+                    $;
 
-                wait(BUS_SNOOP_DELAY, 0);
+                    wait(BUS_SNOOP_DELAY, 0);
 
-                $
-                    if(grantedId == 0) {
-                        *bus0_resp_err = 0;
-                        *bus0_resp_d0 = 0; *bus0_resp_d1 = 0;
-                        *bus0_resp_d2 = 0; *bus0_resp_d3 = 0;
-                        *bus0_resp_valid = true;
-                    }
-                    else {
-                        *bus1_resp_err = 0;
-                        *bus1_resp_d0 = 0; *bus1_resp_d1 = 0;
-                        *bus1_resp_d2 = 0; *bus1_resp_d3 = 0;
-                        *bus1_resp_valid = true;
-                    }
-                $;
-
-            else
-
-                if(grantedCmd == BUS_RD) then
-
-                    // BUS_RD: read miss (dcache or icache)
-                    if(suppliedDirty) then
-
-                        // Peer supplied dirty data; write it to memory for coherence
-                        $
-                            statRdTransactions++;
-                            prepareMemStore(grantedAddr,
-                                (BLOCK_SIZE == 4) ? WORD :
-                                (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
-                                snoopD0, snoopD1, snoopD2, snoopD3);
-                        $;
-
-                        do
-                            wait until(this_phase == 1);
-                            $ ok = dm_outp->push(requestToMemory); $;
-                            if(not ok) then wait end if;
-                        while(not ok) end do;
-
-                        do
-                            wait until(this_phase == 0);
-                            $ hasToken = dm_inp->peek(responseFromMemory); $;
-                            if(not hasToken) then wait end if;
-                        while(not hasToken) end do;
-
-                        $
-                            pulled = dm_inp->pull(responseFromMemory);
-                            sitar::unpack(responseFromMemory, responseErr,
-                                responseData0, responseData1, responseData2, responseData3);
-                        $;
-
-                        // Return the dirty data to requester
-                        $
-                            if(grantedIsIcache) {
-                                if(grantedId == 0) {
-                                    *bus_ic0_resp_err = 0;
-                                    *bus_ic0_resp_d0 = snoopD0; *bus_ic0_resp_d1 = snoopD1;
-                                    *bus_ic0_resp_d2 = snoopD2; *bus_ic0_resp_d3 = snoopD3;
-                                    *bus_ic0_resp_valid = true;
-                                }
-                                else {
-                                    *bus_ic1_resp_err = 0;
-                                    *bus_ic1_resp_d0 = snoopD0; *bus_ic1_resp_d1 = snoopD1;
-                                    *bus_ic1_resp_d2 = snoopD2; *bus_ic1_resp_d3 = snoopD3;
-                                    *bus_ic1_resp_valid = true;
-                                }
-                            }
-                            else {
-                                if(grantedId == 0) {
-                                    *bus0_resp_err = 0;
-                                    *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
-                                    *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
-                                    *bus0_resp_valid = true;
-                                }
-                                else {
-                                    *bus1_resp_err = 0;
-                                    *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
-                                    *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
-                                    *bus1_resp_valid = true;
-                                }
-                            }
-                        $;
-
-                    else
-
-                        // No dirty intervention; fetch from memory (IM for icache, DM for dcache)
-                        $
-                            statRdTransactions++;
-                            prepareMemLoad(grantedAddr);
-                        $;
-
-                        do
-                            wait until(this_phase == 1);
-                            $ ok = (grantedIsIcache ? im_outp : dm_outp)->push(requestToMemory); $;
-                            if(not ok) then wait end if;
-                        while(not ok) end do;
-
-                        do
-                            wait until(this_phase == 0);
-                            $ hasToken = (grantedIsIcache ? im_inp : dm_inp)->peek(responseFromMemory); $;
-                            if(not hasToken) then wait end if;
-                        while(not hasToken) end do;
-
-                        $
-                            pulled = (grantedIsIcache ? im_inp : dm_inp)->pull(responseFromMemory);
-                            sitar::unpack(responseFromMemory, responseErr,
-                                responseData0, responseData1, responseData2, responseData3);
-
-                            if(grantedIsIcache) {
-                                if(grantedId == 0) {
-                                    *bus_ic0_resp_err = responseErr;
-                                    *bus_ic0_resp_d0 = responseData0; *bus_ic0_resp_d1 = responseData1;
-                                    *bus_ic0_resp_d2 = responseData2; *bus_ic0_resp_d3 = responseData3;
-                                    *bus_ic0_resp_valid = true;
-                                }
-                                else {
-                                    *bus_ic1_resp_err = responseErr;
-                                    *bus_ic1_resp_d0 = responseData0; *bus_ic1_resp_d1 = responseData1;
-                                    *bus_ic1_resp_d2 = responseData2; *bus_ic1_resp_d3 = responseData3;
-                                    *bus_ic1_resp_valid = true;
-                                }
-                            }
-                            else {
-                                if(grantedId == 0) {
-                                    *bus0_resp_err = responseErr;
-                                    *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
-                                    *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
-                                    *bus0_resp_valid = true;
-                                }
-                                else {
-                                    *bus1_resp_err = responseErr;
-                                    *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
-                                    *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
-                                    *bus1_resp_valid = true;
-                                }
-                            }
-                        $;
-
-                    end if;
+                    $
+                        if(grantedId == 0) {
+                            *bus0_resp_err = 0;
+                            *bus0_resp_d0 = 0; *bus0_resp_d1 = 0;
+                            *bus0_resp_d2 = 0; *bus0_resp_d3 = 0;
+                            *bus0_resp_valid = true;
+                        }
+                        else {
+                            *bus1_resp_err = 0;
+                            *bus1_resp_d0 = 0; *bus1_resp_d1 = 0;
+                            *bus1_resp_d2 = 0; *bus1_resp_d3 = 0;
+                            *bus1_resp_valid = true;
+                        }
+                    $;
 
                 else
 
-                    if(grantedCmd == BUS_RDX) then
+                    if(grantedCmd == BUS_RD) then
 
-                        // BUS_RDX: write miss (exclusive)
+                        // BUS_RD: read miss (dcache or icache)
                         if(suppliedDirty) then
 
-                            // Peer supplied dirty data; give it directly to requester
+                            // Peer supplied dirty data; write it to memory for coherence
                             $
-                                statRdxTransactions++;
-
-                                if(grantedId == 0) {
-                                    *bus0_resp_err = 0;
-                                    *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
-                                    *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
-                                    *bus0_resp_valid = true;
-                                }
-                                else {
-                                    *bus1_resp_err = 0;
-                                    *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
-                                    *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
-                                    *bus1_resp_valid = true;
-                                }
-                            $;
-
-                            wait(BUS_SNOOP_DELAY, 0);
-
-                        else
-
-                            // No dirty data; fetch from memory
-                            $
-                                statRdxTransactions++;
-                                prepareMemLoad(grantedAddr);
-                            $;
-
-                            do
-                                wait until(this_phase == 1);
-                                $ ok = dm_outp->push(requestToMemory); $;
-                                if(not ok) then wait end if;
-                            while(not ok) end do;
-
-                            do
-                                wait until(this_phase == 0);
-                                $ hasToken = dm_inp->peek(responseFromMemory); $;
-                                if(not hasToken) then wait end if;
-                            while(not hasToken) end do;
-
-                            $
-                                pulled = dm_inp->pull(responseFromMemory);
-                                sitar::unpack(responseFromMemory, responseErr,
-                                    responseData0, responseData1, responseData2, responseData3);
-
-                                if(grantedId == 0) {
-                                    *bus0_resp_err = responseErr;
-                                    *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
-                                    *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
-                                    *bus0_resp_valid = true;
-                                }
-                                else {
-                                    *bus1_resp_err = responseErr;
-                                    *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
-                                    *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
-                                    *bus1_resp_valid = true;
-                                }
-                            $;
-
-                        end if;
-
-                    else if(grantedCmd == BUS_ATOMIC) then
-
-                        // BUS_ATOMIC: coherent read-modify-write.
-                        //
-                        // Ordering:
-                        //   1. Release the requester's own copy of the block
-                        //      (capture its dirty data if MODIFIED, invalidate
-                        //      always).
-                        //   2. Flush the peer's dirty copy (older data) to DM
-                        //      FIRST (already snooped in the arbitration block).
-                        //   3. Flush the requester's dirty copy (newer data) to
-                        //      DM LAST, so the requester's authoritative value
-                        //      wins if both copies were dirty.
-                        //   4. Execute the atomic RMW on DM.
-                        //   5. Return the pre-atomic value to the requester.
-                        //
-                        // Both caches are invalidated by this point: the
-                        // requester via release_for_atomic, the peer via
-                        // handle_snoop(BUS_ATOMIC, ...) done earlier.
-                        $
-                            statAtomicTransactions++;
-
-                            // Release the requester's own copy of the block
-                            if(grantedId == 0) {
-                                reqDirty = dcache0->release_for_atomic(
-                                    snoopAddr, reqD0, reqD1, reqD2, reqD3);
-                            }
-                            else {
-                                reqDirty = dcache1->release_for_atomic(
-                                    snoopAddr, reqD0, reqD1, reqD2, reqD3);
-                            }
-
-                            log << endl
-                                << "BUS ATOMIC core=" << grantedId
-                                << " word=" << grantedAddr
-                                << " block=" << snoopAddr
-                                << " reqDirty=" << reqDirty
-                                << " peerDirty=" << suppliedDirty
-                                << " cycle=" << current_time.cycle();
-
-                            if(reqDirty && suppliedDirty) {
-                                statBothDirty++;
-                                log << endl
-                                    << "BUS ATOMIC BOTH-DIRTY block=" << snoopAddr
-                                    << " (peer flushed first, requester last)"
-                                    << " cycle=" << current_time.cycle();
-                            }
-                        $;
-
-                        // Step 1: flush peer's dirty block to DM (if any).
-                        // This is the older copy, so it must land before the
-                        // requester's newer copy below.
-                        if(suppliedDirty) then
-                            $
-                                prepareMemStore(snoopAddr,
+                                statRdTransactions++;
+                                prepareMemStore(grantedAddr,
                                     (BLOCK_SIZE == 4) ? WORD :
                                     (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
                                     snoopD0, snoopD1, snoopD2, snoopD3);
@@ -3073,81 +2774,316 @@ procedure CoherenceBus
                                 sitar::unpack(responseFromMemory, responseErr,
                                     responseData0, responseData1, responseData2, responseData3);
                             $;
-                        end if;
 
-                        // Step 2: flush requester's dirty block to DM LAST so
-                        // its newer/authoritative data wins over any peer copy.
-                        if(reqDirty) then
+                            // Return the dirty data to requester
                             $
-                                prepareMemStore(snoopAddr,
-                                    (BLOCK_SIZE == 4) ? WORD :
-                                    (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
-                                    reqD0, reqD1, reqD2, reqD3);
+                                if(grantedIsIcache) {
+                                    if(grantedId == 0) {
+                                        *bus_ic0_resp_err = 0;
+                                        *bus_ic0_resp_d0 = snoopD0; *bus_ic0_resp_d1 = snoopD1;
+                                        *bus_ic0_resp_d2 = snoopD2; *bus_ic0_resp_d3 = snoopD3;
+                                        *bus_ic0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus_ic1_resp_err = 0;
+                                        *bus_ic1_resp_d0 = snoopD0; *bus_ic1_resp_d1 = snoopD1;
+                                        *bus_ic1_resp_d2 = snoopD2; *bus_ic1_resp_d3 = snoopD3;
+                                        *bus_ic1_resp_valid = true;
+                                    }
+                                }
+                                else {
+                                    if(grantedId == 0) {
+                                        *bus0_resp_err = 0;
+                                        *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
+                                        *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
+                                        *bus0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus1_resp_err = 0;
+                                        *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
+                                        *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
+                                        *bus1_resp_valid = true;
+                                    }
+                                }
+                            $;
+
+                        else
+
+                            // No dirty intervention; fetch from memory (IM for icache, DM for dcache)
+                            $
+                                statRdTransactions++;
+                                prepareMemLoad(grantedAddr);
                             $;
 
                             do
                                 wait until(this_phase == 1);
-                                $ ok = dm_outp->push(requestToMemory); $;
+                                $ ok = (grantedIsIcache ? im_outp : dm_outp)->push(requestToMemory); $;
                                 if(not ok) then wait end if;
                             while(not ok) end do;
 
                             do
                                 wait until(this_phase == 0);
-                                $ hasToken = dm_inp->peek(responseFromMemory); $;
+                                $ hasToken = (grantedIsIcache ? im_inp : dm_inp)->peek(responseFromMemory); $;
                                 if(not hasToken) then wait end if;
                             while(not hasToken) end do;
 
                             $
-                                pulled = dm_inp->pull(responseFromMemory);
+                                pulled = (grantedIsIcache ? im_inp : dm_inp)->pull(responseFromMemory);
                                 sitar::unpack(responseFromMemory, responseErr,
                                     responseData0, responseData1, responseData2, responseData3);
+
+                                if(grantedIsIcache) {
+                                    if(grantedId == 0) {
+                                        *bus_ic0_resp_err = responseErr;
+                                        *bus_ic0_resp_d0 = responseData0; *bus_ic0_resp_d1 = responseData1;
+                                        *bus_ic0_resp_d2 = responseData2; *bus_ic0_resp_d3 = responseData3;
+                                        *bus_ic0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus_ic1_resp_err = responseErr;
+                                        *bus_ic1_resp_d0 = responseData0; *bus_ic1_resp_d1 = responseData1;
+                                        *bus_ic1_resp_d2 = responseData2; *bus_ic1_resp_d3 = responseData3;
+                                        *bus_ic1_resp_valid = true;
+                                    }
+                                }
+                                else {
+                                    if(grantedId == 0) {
+                                        *bus0_resp_err = responseErr;
+                                        *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
+                                        *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
+                                        *bus0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus1_resp_err = responseErr;
+                                        *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
+                                        *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
+                                        *bus1_resp_valid = true;
+                                    }
+                                }
                             $;
+
                         end if;
 
-                        // Step 3: execute atomic RMW on DM
-                        $
-                            prepareMemAtomic(grantedAddr, grantedSize);
-                        $;
+                    else
 
-                        do
-                            wait until(this_phase == 1);
-                            $ ok = dm_outp->push(requestToMemory); $;
-                            if(not ok) then wait end if;
-                        while(not ok) end do;
+                        if(grantedCmd == BUS_RDX) then
 
-                        do
-                            wait until(this_phase == 0);
-                            $ hasToken = dm_inp->peek(responseFromMemory); $;
-                            if(not hasToken) then wait end if;
-                        while(not hasToken) end do;
+                            // BUS_RDX: write miss (exclusive)
+                            if(suppliedDirty) then
 
-                        // Step 4: return pre-atomic value to requester
-                        $
-                            pulled = dm_inp->pull(responseFromMemory);
-                            sitar::unpack(responseFromMemory, responseErr,
-                                responseData0, responseData1, responseData2, responseData3);
+                                // Peer supplied dirty data; give it directly to requester
+                                $
+                                    statRdxTransactions++;
 
-                            if(grantedId == 0) {
-                                *bus0_resp_err = responseErr;
-                                *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
-                                *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
-                                *bus0_resp_valid = true;
-                            }
-                            else {
-                                *bus1_resp_err = responseErr;
-                                *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
-                                *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
-                                *bus1_resp_valid = true;
-                            }
-                        $;
+                                    if(grantedId == 0) {
+                                        *bus0_resp_err = 0;
+                                        *bus0_resp_d0 = snoopD0; *bus0_resp_d1 = snoopD1;
+                                        *bus0_resp_d2 = snoopD2; *bus0_resp_d3 = snoopD3;
+                                        *bus0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus1_resp_err = 0;
+                                        *bus1_resp_d0 = snoopD0; *bus1_resp_d1 = snoopD1;
+                                        *bus1_resp_d2 = snoopD2; *bus1_resp_d3 = snoopD3;
+                                        *bus1_resp_valid = true;
+                                    }
+                                $;
+
+                                wait(BUS_SNOOP_DELAY, 0);
+
+                            else
+
+                                // No dirty data; fetch from memory
+                                $
+                                    statRdxTransactions++;
+                                    prepareMemLoad(grantedAddr);
+                                $;
+
+                                do
+                                    wait until(this_phase == 1);
+                                    $ ok = dm_outp->push(requestToMemory); $;
+                                    if(not ok) then wait end if;
+                                while(not ok) end do;
+
+                                do
+                                    wait until(this_phase == 0);
+                                    $ hasToken = dm_inp->peek(responseFromMemory); $;
+                                    if(not hasToken) then wait end if;
+                                while(not hasToken) end do;
+
+                                $
+                                    pulled = dm_inp->pull(responseFromMemory);
+                                    sitar::unpack(responseFromMemory, responseErr,
+                                        responseData0, responseData1, responseData2, responseData3);
+
+                                    if(grantedId == 0) {
+                                        *bus0_resp_err = responseErr;
+                                        *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
+                                        *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
+                                        *bus0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus1_resp_err = responseErr;
+                                        *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
+                                        *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
+                                        *bus1_resp_valid = true;
+                                    }
+                                $;
+
+                            end if;
+
+                            else if(grantedCmd == BUS_ATOMIC) then
+
+                                // BUS_ATOMIC: coherent read-modify-write.
+                                //
+                                // Ordering:
+                                //   1. Release the requester's own copy of the block
+                                //      (capture its dirty data if MODIFIED, invalidate
+                                //      always).
+                                //   2. Flush the peer's dirty copy (older data) to DM
+                                //      FIRST (already snooped in the arbitration block).
+                                //   3. Flush the requester's dirty copy (newer data) to
+                                //      DM LAST, so the requester's authoritative value
+                                //      wins if both copies were dirty.
+                                //   4. Execute the atomic RMW on DM.
+                                //   5. Return the pre-atomic value to the requester.
+                                //
+                                // Both caches are invalidated by this point: the
+                                // requester via release_for_atomic, the peer via
+                                // handle_snoop(BUS_ATOMIC, ...) done earlier.
+                                $
+                                    statAtomicTransactions++;
+
+                                    // Release the requester's own copy of the block
+                                    if(grantedId == 0) {
+                                        reqDirty = dcache0->release_for_atomic(
+                                            snoopAddr, reqD0, reqD1, reqD2, reqD3);
+                                    }
+                                    else {
+                                        reqDirty = dcache1->release_for_atomic(
+                                            snoopAddr, reqD0, reqD1, reqD2, reqD3);
+                                    }
+
+                                    log << endl
+                                        << "BUS ATOMIC core=" << grantedId
+                                        << " word=" << grantedAddr
+                                        << " block=" << snoopAddr
+                                        << " reqDirty=" << reqDirty
+                                        << " peerDirty=" << suppliedDirty
+                                        << " cycle=" << current_time.cycle();
+
+                                    if(reqDirty && suppliedDirty) {
+                                        statBothDirty++;
+                                        log << endl
+                                            << "BUS ATOMIC BOTH-DIRTY block=" << snoopAddr
+                                            << " (peer flushed first, requester last)"
+                                            << " cycle=" << current_time.cycle();
+                                    }
+                                $;
+
+                                // Step 1: flush peer's dirty block to DM (if any).
+                                // This is the older copy, so it must land before the
+                                // requester's newer copy below.
+                                if(suppliedDirty) then
+                                    $
+                                        prepareMemStore(snoopAddr,
+                                            (BLOCK_SIZE == 4) ? WORD :
+                                            (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
+                                            snoopD0, snoopD1, snoopD2, snoopD3);
+                                    $;
+
+                                    do
+                                        wait until(this_phase == 1);
+                                        $ ok = dm_outp->push(requestToMemory); $;
+                                        if(not ok) then wait end if;
+                                    while(not ok) end do;
+
+                                    do
+                                        wait until(this_phase == 0);
+                                        $ hasToken = dm_inp->peek(responseFromMemory); $;
+                                        if(not hasToken) then wait end if;
+                                    while(not hasToken) end do;
+
+                                    $
+                                        pulled = dm_inp->pull(responseFromMemory);
+                                        sitar::unpack(responseFromMemory, responseErr,
+                                            responseData0, responseData1, responseData2, responseData3);
+                                    $;
+                                end if;
+
+                                // Step 2: flush requester's dirty block to DM LAST so
+                                // its newer/authoritative data wins over any peer copy.
+                                if(reqDirty) then
+                                    $
+                                        prepareMemStore(snoopAddr,
+                                            (BLOCK_SIZE == 4) ? WORD :
+                                            (BLOCK_SIZE == 8) ? DOUBLEWORD : QUADWORD,
+                                            reqD0, reqD1, reqD2, reqD3);
+                                    $;
+
+                                    do
+                                        wait until(this_phase == 1);
+                                        $ ok = dm_outp->push(requestToMemory); $;
+                                        if(not ok) then wait end if;
+                                    while(not ok) end do;
+
+                                    do
+                                        wait until(this_phase == 0);
+                                        $ hasToken = dm_inp->peek(responseFromMemory); $;
+                                        if(not hasToken) then wait end if;
+                                    while(not hasToken) end do;
+
+                                    $
+                                        pulled = dm_inp->pull(responseFromMemory);
+                                        sitar::unpack(responseFromMemory, responseErr,
+                                            responseData0, responseData1, responseData2, responseData3);
+                                    $;
+                                end if;
+
+                                // Step 3: execute atomic RMW on DM
+                                $
+                                    prepareMemAtomic(grantedAddr, grantedSize);
+                                $;
+
+                                do
+                                    wait until(this_phase == 1);
+                                    $ ok = dm_outp->push(requestToMemory); $;
+                                    if(not ok) then wait end if;
+                                while(not ok) end do;
+
+                                do
+                                    wait until(this_phase == 0);
+                                    $ hasToken = dm_inp->peek(responseFromMemory); $;
+                                    if(not hasToken) then wait end if;
+                                while(not hasToken) end do;
+
+                                // Step 4: return pre-atomic value to requester
+                                $
+                                    pulled = dm_inp->pull(responseFromMemory);
+                                    sitar::unpack(responseFromMemory, responseErr,
+                                        responseData0, responseData1, responseData2, responseData3);
+
+                                    if(grantedId == 0) {
+                                        *bus0_resp_err = responseErr;
+                                        *bus0_resp_d0 = responseData0; *bus0_resp_d1 = responseData1;
+                                        *bus0_resp_d2 = responseData2; *bus0_resp_d3 = responseData3;
+                                        *bus0_resp_valid = true;
+                                    }
+                                    else {
+                                        *bus1_resp_err = responseErr;
+                                        *bus1_resp_d0 = responseData0; *bus1_resp_d1 = responseData1;
+                                        *bus1_resp_d2 = responseData2; *bus1_resp_d3 = responseData3;
+                                        *bus1_resp_valid = true;
+                                    }
+                                $;
+
+                            end if;
+
+                        end if;
 
                     end if;
 
                 end if;
-
-            end if;
-
-            end if;
 
             end if;
 
